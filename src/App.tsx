@@ -77,6 +77,7 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('unwatched'); // Current view tab
   const [loading, setLoading] = useState(false); // Loading state for API calls
   const [error, setError] = useState<string | null>(null); // Error handling state
+  const [expandedShows, setExpandedShows] = useState<Set<string>>(new Set()); // Track which shows are expanded
 
   // 💾 Load watchlist from localStorage on component mount
   useEffect(() => {
@@ -582,6 +583,21 @@ const App = () => {
       .slice(0, 10); // Limit to 10 most recent episodes
   };
 
+  // 🔄 Toggle show expansion
+  const toggleShowExpansion = (showId: string) => {
+    console.log('🔄 Toggling show expansion for', showId);
+    
+    setExpandedShows(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(showId)) {
+        newSet.delete(showId);
+      } else {
+        newSet.add(showId);
+      }
+      return newSet;
+    });
+  };
+
   // 🔄 Toggle season expansion
   const toggleSeasonExpansion = (showId: string, seasonNumber: number) => {
     console.log('🔄 Toggling season expansion for', showId, 'season', seasonNumber);
@@ -890,15 +906,25 @@ const App = () => {
         </div>
 
         {/* 📺 Watchlist Display with Episode Tracking */}
-        <div className="space-y-4">
+        <div className="space-y-2">
           {getFilteredItems().map(item => (
             <div key={item.id} className="bg-gray-900 border border-red-900 rounded-lg overflow-hidden">
-              <div className="bg-gradient-to-r from-red-900 to-red-700 p-3">
+              <button
+                onClick={() => toggleShowExpansion(item.id)}
+                className="w-full bg-gradient-to-r from-red-900 to-red-700 p-3 text-left hover:from-red-800 hover:to-red-600 transition-colors"
+              >
                 <div className="flex items-center justify-between">
-                  <h3 className="font-semibold flex items-center gap-2">
-                    <Tv className="w-4 h-4" />
-                    {item.title}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
+                      {expandedShows.has(item.id) ? (
+                        <ChevronUp className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
+                      )}
+                      <Tv className="w-4 h-4" />
+                    </div>
+                    <h3 className="font-semibold">{item.title}</h3>
+                  </div>
                   <div className="flex items-center gap-2 text-sm">
                     {item.totalEpisodes > 0 && (
                       <span className="bg-black bg-opacity-50 px-2 py-1 rounded">
@@ -910,161 +936,185 @@ const App = () => {
                     )}
                   </div>
                 </div>
-              </div>
+              </button>
               
-              <div className="p-3">
-                <p className="text-sm text-gray-400 mb-2">
-                  {item.platform} • {item.status} • {item.runtime ? `${item.runtime} min` : 'N/A'}
-                </p>
-                
-                {/* 🎭 Genres */}
-                {item.genres && item.genres.length > 0 && (
-                  <p className="text-xs text-gray-500 mb-2">
-                    {item.genres.join(' • ')}
+              {/* Show detailed information only when expanded */}
+              {expandedShows.has(item.id) && (
+                <div className="p-3 border-t border-gray-700">
+                  <p className="text-sm text-gray-400 mb-2">
+                    {item.platform} • {item.status} • {item.runtime ? `${item.runtime} min` : 'N/A'}
                   </p>
-                )}
-                
-                {/* 📅 Next Episode / Release Date */}
-                {item.nextEpisode && item.nextEpisode.season && !item.watched && (
-                  <div className="bg-black rounded p-2 mb-2">
-                    <p className="text-sm font-semibold flex items-center gap-1">
-                      <Play className="w-3 h-3" /> Next Episode:
+                  
+                  {/* 🎭 Genres */}
+                  {item.genres && item.genres.length > 0 && (
+                    <p className="text-xs text-gray-500 mb-2">
+                      {item.genres.join(' • ')}
                     </p>
-                    <p className="text-xs text-gray-400">
-                      S{item.nextEpisode.season}E{item.nextEpisode.episode}: {item.nextEpisode.title}
-                    </p>
-                    <p className="text-xs text-red-400 flex items-center gap-1 mt-1">
-                      <Calendar className="w-3 h-3" /> {item.nextEpisode.airDate} {item.nextEpisode.airTime && `at ${item.nextEpisode.airTime}`}
-                    </p>
-                  </div>
-                )}
-
-                {/* 📺 Seasons and Episodes */}
-                {item.seasons && item.seasons.length > 0 && (
-                  <div className="mt-3">
-                    <h4 className="text-sm font-semibold mb-2">Seasons & Episodes</h4>
-                    <div className="space-y-2">
-                      {item.seasons.map(season => (
-                        <div key={season.number} className="border border-gray-700 rounded">
-                          <div className="flex items-center">
-                            <button
-                              onClick={() => toggleSeasonExpansion(item.id, season.number)}
-                              className="flex-1 flex items-center justify-between p-2 hover:bg-gray-800 text-left"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">Season {season.number}</span>
-                                <span className="text-xs text-gray-400">
-                                  {season.watchedEpisodes}/{season.totalEpisodes} watched
-                                </span>
-                              </div>
-                              {item.expandedSeasons?.includes(season.number) ? (
-                                <ChevronUp className="w-4 h-4" />
-                              ) : (
-                                <ChevronDown className="w-4 h-4" />
-                              )}
-                            </button>
-                            <div className="flex gap-1 p-1">
-                              <button
-                                onClick={() => markSeasonWatched(item.id, season.number, true)}
-                                className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-xs"
-                                title="Mark season as watched"
-                              >
-                                <Check className="w-3 h-3" />
-                              </button>
-                              <button
-                                onClick={() => markSeasonWatched(item.id, season.number, false)}
-                                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
-                                title="Mark season as unwatched"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-                          
-                          {item.expandedSeasons?.includes(season.number) && (
-                            <div className="p-2 bg-gray-800 border-t border-gray-700">
-                              <div className="grid grid-cols-1 gap-1 max-h-60 overflow-y-auto">
-                                {season.episodes.map(episode => (
-                                  <div key={episode.id} className="flex items-center justify-between p-2 hover:bg-gray-700 rounded text-sm">
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        onClick={() => toggleEpisodeWatched(item.id, episode.id)}
-                                        className="flex-shrink-0"
-                                      >
-                                        {episode.watched ? (
-                                          <CheckCircle className="w-4 h-4 text-green-400" />
-                                        ) : (
-                                          <Circle className="w-4 h-4 text-gray-400" />
-                                        )}
-                                      </button>
-                                      <span className="font-medium">
-                                        S{episode.season}E{episode.episode.toString().padStart(2, '0')}
-                                      </span>
-                                      <span className="text-gray-300">{episode.title}</span>
-                                    </div>
-                                    <div className="text-xs text-gray-400">
-                                      {episode.airDate}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                  )}
+                  
+                  {/* 📅 Next Episode / Release Date */}
+                  {item.nextEpisode && item.nextEpisode.season && !item.watched && (
+                    <div className="bg-black rounded p-2 mb-2">
+                      <p className="text-sm font-semibold flex items-center gap-1">
+                        <Play className="w-3 h-3" /> Next Episode:
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        S{item.nextEpisode.season}E{item.nextEpisode.episode}: {item.nextEpisode.title}
+                      </p>
+                      <p className="text-xs text-red-400 flex items-center gap-1 mt-1">
+                        <Calendar className="w-3 h-3" /> {item.nextEpisode.airDate} {item.nextEpisode.airTime && `at ${item.nextEpisode.airTime}`}
+                      </p>
                     </div>
+                  )}
+
+                  {/* 📺 Seasons and Episodes */}
+                  {item.seasons && item.seasons.length > 0 && (
+                    <div className="mt-3">
+                      <h4 className="text-sm font-semibold mb-2">Seasons & Episodes</h4>
+                      <div className="space-y-2">
+                        {item.seasons.map(season => (
+                          <div key={season.number} className="border border-gray-700 rounded">
+                            <div className="flex items-center">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleSeasonExpansion(item.id, season.number);
+                                }}
+                                className="flex-1 flex items-center justify-between p-2 hover:bg-gray-800 text-left"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">Season {season.number}</span>
+                                  <span className="text-xs text-gray-400">
+                                    {season.watchedEpisodes}/{season.totalEpisodes} watched
+                                  </span>
+                                </div>
+                                {item.expandedSeasons?.includes(season.number) ? (
+                                  <ChevronUp className="w-4 h-4" />
+                                ) : (
+                                  <ChevronDown className="w-4 h-4" />
+                                )}
+                              </button>
+                              <div className="flex gap-1 p-1">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    markSeasonWatched(item.id, season.number, true);
+                                  }}
+                                  className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-xs"
+                                  title="Mark season as watched"
+                                >
+                                  <Check className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    markSeasonWatched(item.id, season.number, false);
+                                  }}
+                                  className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                                  title="Mark season as unwatched"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {item.expandedSeasons?.includes(season.number) && (
+                              <div className="p-2 bg-gray-800 border-t border-gray-700">
+                                <div className="grid grid-cols-1 gap-1 max-h-60 overflow-y-auto">
+                                  {season.episodes.map(episode => (
+                                    <div key={episode.id} className="flex items-center justify-between p-2 hover:bg-gray-700 rounded text-sm">
+                                      <div className="flex items-center gap-2">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleEpisodeWatched(item.id, episode.id);
+                                          }}
+                                          className="flex-shrink-0"
+                                        >
+                                          {episode.watched ? (
+                                            <CheckCircle className="w-4 h-4 text-green-400" />
+                                          ) : (
+                                            <Circle className="w-4 h-4 text-gray-400" />
+                                          )}
+                                        </button>
+                                        <span className="font-medium">
+                                          S{episode.season}E{episode.episode.toString().padStart(2, '0')}
+                                        </span>
+                                        <span className="text-gray-300">{episode.title}</span>
+                                      </div>
+                                      <div className="text-xs text-gray-400">
+                                        {episode.airDate}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 🔗 Links */}
+                  <div className="flex gap-2 text-xs mb-2 mt-3">
+                    {item.tvmazeUrl && (
+                      <a 
+                        href={item.tvmazeUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-red-400 hover:text-red-300 underline"
+                      >
+                        TVmaze ↗
+                      </a>
+                    )}
+                    {item.officialSite && (
+                      <a 
+                        href={item.officialSite} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-red-400 hover:text-red-300 underline"
+                      >
+                        Official Site ↗
+                      </a>
+                    )}
                   </div>
-                )}
 
-                {/* 🔗 Links */}
-                <div className="flex gap-2 text-xs mb-2 mt-3">
-                  {item.tvmazeUrl && (
-                    <a 
-                      href={item.tvmazeUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-red-400 hover:text-red-300 underline"
-                    >
-                      TVmaze ↗
-                    </a>
-                  )}
-                  {item.officialSite && (
-                    <a 
-                      href={item.officialSite} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-red-400 hover:text-red-300 underline"
-                    >
-                      Official Site ↗
-                    </a>
-                  )}
-                </div>
-
-                {/* 🎮 Action Buttons */}
-                <div className="flex gap-2 mt-3">
-                  {!item.watched ? (
+                  {/* 🎮 Action Buttons */}
+                  <div className="flex gap-2 mt-3">
+                    {!item.watched ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          markAsWatched(item.id, item.type === 'tv' ? item.nextEpisode : null);
+                        }}
+                        className="flex-1 bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
+                      >
+                        <Check className="w-3 h-3" /> Mark Series Watched
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          markSeriesWatched(item.id, false);
+                        }}
+                        className="flex-1 bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
+                      >
+                        <X className="w-3 h-3" /> Unwatch Series
+                      </button>
+                    )}
                     <button
-                      onClick={() => markAsWatched(item.id, item.type === 'tv' ? item.nextEpisode : null)}
-                      className="flex-1 bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFromWatchlist(item.id);
+                      }}
+                      className="flex-1 bg-red-800 hover:bg-red-700 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
                     >
-                      <Check className="w-3 h-3" /> Mark Series Watched
+                      <X className="w-3 h-3" /> Remove
                     </button>
-                  ) : (
-                    <button
-                      onClick={() => markSeriesWatched(item.id, false)}
-                      className="flex-1 bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
-                    >
-                      <X className="w-3 h-3" /> Unwatch Series
-                    </button>
-                  )}
-                  <button
-                    onClick={() => removeFromWatchlist(item.id)}
-                    className="flex-1 bg-red-800 hover:bg-red-700 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
-                  >
-                    <X className="w-3 h-3" /> Remove
-                  </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           ))}
         </div>
