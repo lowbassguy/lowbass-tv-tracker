@@ -78,6 +78,7 @@ const App = () => {
   const [loading, setLoading] = useState(false); // Loading state for API calls
   const [error, setError] = useState<string | null>(null); // Error handling state
   const [expandedShows, setExpandedShows] = useState<Set<string>>(new Set()); // Track which shows are expanded
+  const [latestEpisodesSortOrder, setLatestEpisodesSortOrder] = useState<'newest' | 'oldest'>('newest'); // Sort order for latest episodes
 
   // 💾 Load watchlist from localStorage on component mount
   useEffect(() => {
@@ -577,10 +578,16 @@ const App = () => {
       }
     });
     
-    // Sort by air date (most recent first)
-    return allUnwatchedEpisodes
-      .sort((a, b) => new Date(b.airDate).getTime() - new Date(a.airDate).getTime())
-      .slice(0, 10); // Limit to 10 most recent episodes
+    // Sort by air date based on selected sort order
+    const sortedEpisodes = allUnwatchedEpisodes.sort((a, b) => {
+      if (latestEpisodesSortOrder === 'newest') {
+        return new Date(b.airDate).getTime() - new Date(a.airDate).getTime(); // Newest first
+      } else {
+        return new Date(a.airDate).getTime() - new Date(b.airDate).getTime(); // Oldest first
+      }
+    });
+    
+    return sortedEpisodes.slice(0, 10); // Limit to 10 episodes
   };
 
   // 🔄 Toggle show expansion
@@ -828,10 +835,35 @@ const App = () => {
         {/* 📺 Latest Unwatched Episodes */}
         {getLatestUnwatchedEpisodes().length > 0 && (
           <div className="bg-gray-900 border border-red-900 rounded-lg p-4 mb-6">
-            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-              <Clock className="w-5 h-5" />
-              Latest Unwatched Episodes
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Clock className="w-5 h-5" />
+                Latest Unwatched Episodes
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-400">Sort by:</span>
+                <button
+                  onClick={() => setLatestEpisodesSortOrder(latestEpisodesSortOrder === 'newest' ? 'oldest' : 'newest')}
+                  className={`px-3 py-1 rounded text-sm transition-colors ${
+                    latestEpisodesSortOrder === 'newest' 
+                      ? 'bg-red-700 text-white' 
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Newest
+                </button>
+                <button
+                  onClick={() => setLatestEpisodesSortOrder(latestEpisodesSortOrder === 'oldest' ? 'newest' : 'oldest')}
+                  className={`px-3 py-1 rounded text-sm transition-colors ${
+                    latestEpisodesSortOrder === 'oldest' 
+                      ? 'bg-red-700 text-white' 
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Oldest
+                </button>
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {getLatestUnwatchedEpisodes().map((episode, index) => (
                 <div key={`${episode.showId}-${episode.id}`} className="bg-black border border-gray-700 rounded p-3">
