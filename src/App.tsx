@@ -4,9 +4,29 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Search, Tv, Calendar, Check, X, Play, Clock, Star, Info } from 'lucide-react';
+import { Search, Tv, Calendar, Check, X, Play, Clock, Star, Info, ChevronDown, ChevronUp, CheckCircle, Circle } from 'lucide-react';
 
 // Define types for better TypeScript support
+interface Episode {
+  id: number;
+  season: number;
+  episode: number;
+  title: string;
+  airDate: string;
+  airTime?: string;
+  runtime?: number;
+  summary?: string;
+  watched: boolean;
+  watchedDate?: string;
+}
+
+interface Season {
+  number: number;
+  episodes: Episode[];
+  totalEpisodes: number;
+  watchedEpisodes: number;
+}
+
 interface NextEpisode {
   season?: number;
   episode?: number;
@@ -37,9 +57,16 @@ interface Show {
   tvmazeId: number;
   addedDate?: string;
   watched?: boolean;
-  watchedEpisodes?: any[];
+  watchedEpisodes?: any[]; // Legacy field, will be replaced
   watchedDate?: string;
   lastWatchedEpisode?: NextEpisode | null;
+  // New comprehensive episode tracking
+  seasons: Season[];
+  episodes: Episode[];
+  totalEpisodes: number;
+  watchedEpisodesCount: number;
+  lastUpdated?: string;
+  expandedSeasons?: number[]; // UI state for expanded seasons
 }
 
 const App = () => {
@@ -72,6 +99,89 @@ const App = () => {
       console.log('🧹 Component cleanup initiated');
     };
   }, []);
+
+  // 📅 Daily update system - refresh episode data
+  useEffect(() => {
+    const updateShowsDaily = async () => {
+      console.log('📅 Running daily update check...');
+      
+      if (watchlist.length === 0) return;
+      
+      const now = new Date();
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      
+      // Find shows that need updating (not updated in last 24 hours)
+      const showsToUpdate = watchlist.filter(show => {
+        if (!show.lastUpdated) return true;
+        const lastUpdated = new Date(show.lastUpdated);
+        return lastUpdated < oneDayAgo;
+      });
+      
+      console.log('🔄 Found', showsToUpdate.length, 'shows needing updates');
+      
+      if (showsToUpdate.length === 0) return;
+      
+      // Update shows in batches to avoid overwhelming the API
+      const batchSize = 3;
+      for (let i = 0; i < showsToUpdate.length; i += batchSize) {
+        const batch = showsToUpdate.slice(i, i + batchSize);
+        console.log('📡 Updating batch', Math.floor(i / batchSize) + 1, '/', Math.ceil(showsToUpdate.length / batchSize));
+        
+        const updates = await Promise.all(
+          batch.map(async (show) => {
+            try {
+              console.log('🔄 Updating episode data for', show.title);
+              const updatedShow = await updateShowWithEpisodes(show);
+              return updatedShow;
+            } catch (err) {
+              console.error('❌ Failed to update', show.title, ':', err);
+              return show; // Return original show if update fails
+            }
+          })
+        );
+        
+        // Update the watchlist with the updated shows
+        setWatchlist(prevWatchlist => 
+          prevWatchlist.map(show => {
+            const updatedShow = updates.find(u => u.id === show.id);
+            return updatedShow || show;
+          })
+        );
+        
+        // Add delay between batches to be respectful to the API
+        if (i + batchSize < showsToUpdate.length) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+      
+      console.log('✅ Daily update completed!');
+    };
+    
+    // Run on component mount
+    updateShowsDaily();
+    
+    // Set up daily update at midnight
+    const scheduleNextUpdate = () => {
+      const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(0, 0, 0, 0); // Set to midnight
+      
+      const msUntilMidnight = tomorrow.getTime() - now.getTime();
+      console.log('⏰ Next update scheduled in', Math.floor(msUntilMidnight / 1000 / 60 / 60), 'hours');
+      
+      return setTimeout(() => {
+        updateShowsDaily();
+        scheduleNextUpdate(); // Schedule the next update
+      }, msUntilMidnight);
+    };
+    
+    const timeoutId = scheduleNextUpdate();
+    
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [watchlist.length]); // Only depend on watchlist length to avoid infinite loops
 
   // 💾 Save watchlist to localStorage whenever it changes
   useEffect(() => {
@@ -149,7 +259,14 @@ const App = () => {
           premiered: show.premiered,
           officialSite: show.officialSite,
           tvmazeUrl: show.url,
-          tvmazeId: show.id
+          tvmazeId: show.id,
+          // Initialize new comprehensive episode tracking fields
+          seasons: [],
+          episodes: [],
+          totalEpisodes: 0,
+          watchedEpisodesCount: 0,
+          lastUpdated: new Date().toISOString(),
+          expandedSeasons: []
         };
       });
       
@@ -222,8 +339,100 @@ const App = () => {
     }
   };
 
+  // 📺 Fetch comprehensive episode list for a show
+  const fetchEpisodeList = async (tvmazeId: number): Promise<Episode[]> => {
+    console.log('📺 Fetching episode list for show ID:', tvmazeId);
+    
+    try {
+      const response = await fetch(`https://api.tvmaze.com/shows/${tvmazeId}/episodes`);
+      const episodes = await response.json();
+      
+      console.log('📦 Fetched', episodes.length, 'episodes');
+      
+      return episodes.map((ep: any) => ({
+        id: ep.id,
+        season: ep.season,
+        episode: ep.number,
+        title: ep.name,
+        airDate: ep.airdate,
+        airTime: ep.airtime,
+        runtime: ep.runtime,
+        summary: ep.summary ? ep.summary.replace(/<[^>]*>/g, '') : '',
+        watched: false,
+        watchedDate: undefined
+      }));
+    } catch (err) {
+      console.error('❌ Error fetching episode list:', err);
+      return [];
+    }
+  };
+
+  // 🗂️ Organize episodes into seasons
+  const organizeEpisodesIntoSeasons = (episodes: Episode[]): Season[] => {
+    console.log('🗂️ Organizing', episodes.length, 'episodes into seasons');
+    
+    const seasonMap = new Map<number, Episode[]>();
+    
+    episodes.forEach(episode => {
+      const seasonNumber = episode.season;
+      if (!seasonMap.has(seasonNumber)) {
+        seasonMap.set(seasonNumber, []);
+      }
+      seasonMap.get(seasonNumber)!.push(episode);
+    });
+    
+    const seasons: Season[] = Array.from(seasonMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([seasonNumber, seasonEpisodes]) => ({
+        number: seasonNumber,
+        episodes: seasonEpisodes.sort((a, b) => a.episode - b.episode),
+        totalEpisodes: seasonEpisodes.length,
+        watchedEpisodes: seasonEpisodes.filter(ep => ep.watched).length
+      }));
+    
+    console.log('✅ Organized into', seasons.length, 'seasons');
+    return seasons;
+  };
+
+  // 🔄 Update show with comprehensive episode data
+  const updateShowWithEpisodes = async (show: Show): Promise<Show> => {
+    console.log('🔄 Updating show with episode data:', show.title);
+    
+    const episodes = await fetchEpisodeList(show.tvmazeId);
+    const seasons = organizeEpisodesIntoSeasons(episodes);
+    
+    // Find next unwatched episode
+    let nextEpisode: NextEpisode | null = null;
+    const nextUnwatched = episodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
+    
+    if (nextUnwatched) {
+      nextEpisode = {
+        season: nextUnwatched.season,
+        episode: nextUnwatched.episode,
+        title: nextUnwatched.title,
+        airDate: nextUnwatched.airDate,
+        airTime: nextUnwatched.airTime,
+        runtime: nextUnwatched.runtime,
+        hasNext: true
+      };
+    }
+    
+    const watchedCount = episodes.filter(ep => ep.watched).length;
+    
+    return {
+      ...show,
+      episodes,
+      seasons,
+      totalEpisodes: episodes.length,
+      watchedEpisodesCount: watchedCount,
+      nextEpisode,
+      watched: watchedCount === episodes.length && episodes.length > 0,
+      lastUpdated: new Date().toISOString()
+    };
+  };
+
   // ➕ Add item to watchlist
-  const addToWatchlist = (item: Show) => {
+  const addToWatchlist = async (item: Show) => {
     console.log('➕ Adding to watchlist:', item.title);
     
     // Check if already in watchlist
@@ -236,82 +445,95 @@ const App = () => {
       ...item,
       addedDate: new Date().toISOString(),
       watched: false,
-      watchedEpisodes: []
+      watchedEpisodes: [], // Legacy field, will be replaced
+      seasons: [], // Initialize new comprehensive episode tracking fields
+      episodes: [],
+      totalEpisodes: 0,
+      watchedEpisodesCount: 0,
+      lastUpdated: new Date().toISOString(),
+      expandedSeasons: []
     };
     
+    // Add to watchlist immediately for better UX
     setWatchlist([...watchlist, newItem]);
     setSearchResults([]); // Clear search results
     setSearchQuery(''); // Clear search input
     console.log('✅ Successfully added to watchlist!');
+    
+    // Fetch episode data in background
+    try {
+      console.log('📺 Fetching episode data for', item.title);
+      const updatedItem = await updateShowWithEpisodes(newItem);
+      
+      // Update the watchlist with episode data
+      setWatchlist(prevWatchlist => 
+        prevWatchlist.map(w => w.id === item.id ? updatedItem : w)
+      );
+      console.log('✅ Episode data loaded for', item.title);
+    } catch (err) {
+      console.error('❌ Error loading episode data:', err);
+    }
   };
 
-  // ✅ Mark episode/movie as watched
+  // 📺 Mark entire series as watched/unwatched
+  const markSeriesWatched = (showId: string, watched: boolean) => {
+    console.log('📺 Marking entire series as', watched ? 'watched' : 'unwatched', 'for show', showId);
+    
+    setWatchlist(prevWatchlist => 
+      prevWatchlist.map(show => {
+        if (show.id === showId) {
+          const updatedEpisodes = show.episodes.map(episode => ({
+            ...episode,
+            watched,
+            watchedDate: watched ? new Date().toISOString() : undefined
+          }));
+          
+          // Recalculate seasons with updated watched counts
+          const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
+          
+          // Calculate overall stats
+          const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
+          const totalEpisodes = updatedEpisodes.length;
+          
+          // Find next unwatched episode
+          const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
+          const nextEpisode = nextUnwatched ? {
+            season: nextUnwatched.season,
+            episode: nextUnwatched.episode,
+            title: nextUnwatched.title,
+            airDate: nextUnwatched.airDate,
+            airTime: nextUnwatched.airTime,
+            runtime: nextUnwatched.runtime,
+            hasNext: true
+          } : null;
+          
+          return {
+            ...show,
+            episodes: updatedEpisodes,
+            seasons: updatedSeasons,
+            watchedEpisodesCount: watchedCount,
+            watched: watchedCount === totalEpisodes && totalEpisodes > 0,
+            nextEpisode,
+            lastUpdated: new Date().toISOString(),
+            watchedDate: watched ? new Date().toISOString() : undefined
+          };
+        }
+        return show;
+      })
+    );
+  };
+
+  // ✅ Mark episode/movie as watched (updated to use new system)
   const markAsWatched = (itemId: string, episodeInfo: NextEpisode | null = null) => {
     console.log('✅ Marking as watched:', itemId, episodeInfo);
     
-    setWatchlist(watchlist.map(item => {
-      if (item.id === itemId) {
-        console.log('📺 Marking show/episode as watched');
-        const updatedItem: Show = {
-          ...item,
-          watched: true,
-          watchedDate: new Date().toISOString(),
-          lastWatchedEpisode: episodeInfo || item.nextEpisode
-        };
-        
-        // 🔄 Fetch next episode after marking current as watched
-        if (item.tvmazeId && episodeInfo) {
-          console.log('🔍 Fetching next episode after marking watched...');
-          fetchNextEpisodeForItem(item.tvmazeId, itemId);
-        }
-        
-        return updatedItem;
-      }
-      return item;
-    }));
+    // Use the new series marking function
+    markSeriesWatched(itemId, true);
     
     console.log('✅ Watch status updated!');
   };
 
-  // 📅 Fetch next episode for a specific watchlist item
-  const fetchNextEpisodeForItem = async (tvmazeId: number, itemId: string) => {
-    console.log('📅 Fetching updated episode info for show ID:', tvmazeId);
-    
-    try {
-      const response = await fetch(`https://api.tvmaze.com/shows/${tvmazeId}?embed=nextepisode`);
-      const data = await response.json();
-      
-      if (data._embedded?.nextepisode) {
-        const nextEp = data._embedded.nextepisode;
-        console.log('📺 Found new next episode:', nextEp.name);
-        
-        setWatchlist(prevWatchlist => 
-          prevWatchlist.map(item => {
-            if (item.id === itemId) {
-              return {
-                ...item,
-                watched: false, // Reset watched status for new episode
-                nextEpisode: {
-                  season: nextEp.season,
-                  episode: nextEp.number,
-                  title: nextEp.name,
-                  airDate: nextEp.airdate,
-                  airTime: nextEp.airtime,
-                  runtime: nextEp.runtime
-                }
-              };
-            }
-            return item;
-          })
-        );
-      } else {
-        console.log('🏁 No more episodes available for this show');
-        // Keep it marked as watched if no more episodes
-      }
-    } catch (err) {
-      console.error('❌ Error fetching next episode:', err);
-    }
-  };
+  // Note: fetchNextEpisodeForItem function removed as it's replaced by the new episode tracking system
 
   // 🗑️ Remove from watchlist
   const removeFromWatchlist = (itemId: string) => {
@@ -332,6 +554,158 @@ const App = () => {
       default:
         return watchlist;
     }
+  };
+
+  // 📺 Get latest unwatched episodes across all shows
+  const getLatestUnwatchedEpisodes = () => {
+    console.log('📺 Getting latest unwatched episodes...');
+    
+    const allUnwatchedEpisodes: (Episode & { showTitle: string; showId: string })[] = [];
+    
+    watchlist.forEach(show => {
+      if (!show.watched && show.episodes) {
+        const unwatchedEpisodes = show.episodes
+          .filter(ep => !ep.watched && new Date(ep.airDate) <= new Date())
+          .map(ep => ({
+            ...ep,
+            showTitle: show.title,
+            showId: show.id
+          }));
+        
+        allUnwatchedEpisodes.push(...unwatchedEpisodes);
+      }
+    });
+    
+    // Sort by air date (most recent first)
+    return allUnwatchedEpisodes
+      .sort((a, b) => new Date(b.airDate).getTime() - new Date(a.airDate).getTime())
+      .slice(0, 10); // Limit to 10 most recent episodes
+  };
+
+  // 🔄 Toggle season expansion
+  const toggleSeasonExpansion = (showId: string, seasonNumber: number) => {
+    console.log('🔄 Toggling season expansion for', showId, 'season', seasonNumber);
+    
+    setWatchlist(prevWatchlist => 
+      prevWatchlist.map(show => {
+        if (show.id === showId) {
+          const currentExpanded = show.expandedSeasons || [];
+          const isExpanded = currentExpanded.includes(seasonNumber);
+          
+          return {
+            ...show,
+            expandedSeasons: isExpanded 
+              ? currentExpanded.filter(s => s !== seasonNumber)
+              : [...currentExpanded, seasonNumber]
+          };
+        }
+        return show;
+      })
+    );
+  };
+
+  // 📺 Toggle individual episode watched status
+  const toggleEpisodeWatched = (showId: string, episodeId: number) => {
+    console.log('📺 Toggling episode watched status for show', showId, 'episode', episodeId);
+    
+    setWatchlist(prevWatchlist => 
+      prevWatchlist.map(show => {
+        if (show.id === showId) {
+          const updatedEpisodes = show.episodes.map(episode => {
+            if (episode.id === episodeId) {
+              return {
+                ...episode,
+                watched: !episode.watched,
+                watchedDate: !episode.watched ? new Date().toISOString() : undefined
+              };
+            }
+            return episode;
+          });
+          
+          // Recalculate seasons with updated watched counts
+          const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
+          
+          // Calculate overall stats
+          const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
+          const totalEpisodes = updatedEpisodes.length;
+          
+          // Find next unwatched episode
+          const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
+          const nextEpisode = nextUnwatched ? {
+            season: nextUnwatched.season,
+            episode: nextUnwatched.episode,
+            title: nextUnwatched.title,
+            airDate: nextUnwatched.airDate,
+            airTime: nextUnwatched.airTime,
+            runtime: nextUnwatched.runtime,
+            hasNext: true
+          } : null;
+          
+          return {
+            ...show,
+            episodes: updatedEpisodes,
+            seasons: updatedSeasons,
+            watchedEpisodesCount: watchedCount,
+            watched: watchedCount === totalEpisodes && totalEpisodes > 0,
+            nextEpisode,
+            lastUpdated: new Date().toISOString()
+          };
+        }
+        return show;
+      })
+    );
+  };
+
+  // 🗂️ Mark entire season as watched/unwatched
+  const markSeasonWatched = (showId: string, seasonNumber: number, watched: boolean) => {
+    console.log('🗂️ Marking season', seasonNumber, 'as', watched ? 'watched' : 'unwatched', 'for show', showId);
+    
+    setWatchlist(prevWatchlist => 
+      prevWatchlist.map(show => {
+        if (show.id === showId) {
+          const updatedEpisodes = show.episodes.map(episode => {
+            if (episode.season === seasonNumber) {
+              return {
+                ...episode,
+                watched,
+                watchedDate: watched ? new Date().toISOString() : undefined
+              };
+            }
+            return episode;
+          });
+          
+          // Recalculate seasons with updated watched counts
+          const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
+          
+          // Calculate overall stats
+          const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
+          const totalEpisodes = updatedEpisodes.length;
+          
+          // Find next unwatched episode
+          const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
+          const nextEpisode = nextUnwatched ? {
+            season: nextUnwatched.season,
+            episode: nextUnwatched.episode,
+            title: nextUnwatched.title,
+            airDate: nextUnwatched.airDate,
+            airTime: nextUnwatched.airTime,
+            runtime: nextUnwatched.runtime,
+            hasNext: true
+          } : null;
+          
+          return {
+            ...show,
+            episodes: updatedEpisodes,
+            seasons: updatedSeasons,
+            watchedEpisodesCount: watchedCount,
+            watched: watchedCount === totalEpisodes && totalEpisodes > 0,
+            nextEpisode,
+            lastUpdated: new Date().toISOString()
+          };
+        }
+        return show;
+      })
+    );
   };
 
   // 🎨 Main render function
@@ -435,6 +809,43 @@ const App = () => {
           )}
         </div>
 
+        {/* 📺 Latest Unwatched Episodes */}
+        {getLatestUnwatchedEpisodes().length > 0 && (
+          <div className="bg-gray-900 border border-red-900 rounded-lg p-4 mb-6">
+            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Clock className="w-5 h-5" />
+              Latest Unwatched Episodes
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {getLatestUnwatchedEpisodes().map((episode, index) => (
+                <div key={`${episode.showId}-${episode.id}`} className="bg-black border border-gray-700 rounded p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleEpisodeWatched(episode.showId, episode.id)}
+                        className="flex-shrink-0"
+                      >
+                        <Circle className="w-4 h-4 text-gray-400" />
+                      </button>
+                      <span className="text-sm font-medium text-gray-300">
+                        {episode.showTitle}
+                      </span>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {new Date(episode.airDate).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="ml-6">
+                    <p className="text-sm text-white">
+                      S{episode.season}E{episode.episode.toString().padStart(2, '0')}: {episode.title}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 📑 Tabs */}
         <div className="flex gap-2 mb-4">
           <button
@@ -478,15 +889,27 @@ const App = () => {
           </button>
         </div>
 
-        {/* 📺 Watchlist Display */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* 📺 Watchlist Display with Episode Tracking */}
+        <div className="space-y-4">
           {getFilteredItems().map(item => (
             <div key={item.id} className="bg-gray-900 border border-red-900 rounded-lg overflow-hidden">
               <div className="bg-gradient-to-r from-red-900 to-red-700 p-3">
-                <h3 className="font-semibold flex items-center gap-2">
-                  <Tv className="w-4 h-4" />
-                  {item.title}
-                </h3>
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold flex items-center gap-2">
+                    <Tv className="w-4 h-4" />
+                    {item.title}
+                  </h3>
+                  <div className="flex items-center gap-2 text-sm">
+                    {item.totalEpisodes > 0 && (
+                      <span className="bg-black bg-opacity-50 px-2 py-1 rounded">
+                        {item.watchedEpisodesCount}/{item.totalEpisodes} episodes
+                      </span>
+                    )}
+                    {item.watched && (
+                      <CheckCircle className="w-4 h-4 text-green-400" />
+                    )}
+                  </div>
+                </div>
               </div>
               
               <div className="p-3">
@@ -515,28 +938,86 @@ const App = () => {
                     </p>
                   </div>
                 )}
-                
-                {/* 📺 Last Watched Episode */}
-                {item.lastWatchedEpisode && item.watched && (
-                  <div className="bg-gray-800 rounded p-2 mb-2">
-                    <p className="text-sm font-semibold">Last Watched:</p>
-                    <p className="text-xs text-gray-400">
-                      S{item.lastWatchedEpisode.season}E{item.lastWatchedEpisode.episode}: {item.lastWatchedEpisode.title}
-                    </p>
-                  </div>
-                )}
 
-                {/* ✅ Watched Status */}
-                {item.watched && !item.nextEpisode && (
-                  <div className="bg-green-900 rounded p-2 mb-2">
-                    <p className="text-sm flex items-center gap-1">
-                      <Check className="w-3 h-3" /> All caught up! Watched on {item.watchedDate && new Date(item.watchedDate).toLocaleDateString()}
-                    </p>
+                {/* 📺 Seasons and Episodes */}
+                {item.seasons && item.seasons.length > 0 && (
+                  <div className="mt-3">
+                    <h4 className="text-sm font-semibold mb-2">Seasons & Episodes</h4>
+                    <div className="space-y-2">
+                      {item.seasons.map(season => (
+                        <div key={season.number} className="border border-gray-700 rounded">
+                          <div className="flex items-center">
+                            <button
+                              onClick={() => toggleSeasonExpansion(item.id, season.number)}
+                              className="flex-1 flex items-center justify-between p-2 hover:bg-gray-800 text-left"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">Season {season.number}</span>
+                                <span className="text-xs text-gray-400">
+                                  {season.watchedEpisodes}/{season.totalEpisodes} watched
+                                </span>
+                              </div>
+                              {item.expandedSeasons?.includes(season.number) ? (
+                                <ChevronUp className="w-4 h-4" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4" />
+                              )}
+                            </button>
+                            <div className="flex gap-1 p-1">
+                              <button
+                                onClick={() => markSeasonWatched(item.id, season.number, true)}
+                                className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-xs"
+                                title="Mark season as watched"
+                              >
+                                <Check className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => markSeasonWatched(item.id, season.number, false)}
+                                className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
+                                title="Mark season as unwatched"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                          
+                          {item.expandedSeasons?.includes(season.number) && (
+                            <div className="p-2 bg-gray-800 border-t border-gray-700">
+                              <div className="grid grid-cols-1 gap-1 max-h-60 overflow-y-auto">
+                                {season.episodes.map(episode => (
+                                  <div key={episode.id} className="flex items-center justify-between p-2 hover:bg-gray-700 rounded text-sm">
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => toggleEpisodeWatched(item.id, episode.id)}
+                                        className="flex-shrink-0"
+                                      >
+                                        {episode.watched ? (
+                                          <CheckCircle className="w-4 h-4 text-green-400" />
+                                        ) : (
+                                          <Circle className="w-4 h-4 text-gray-400" />
+                                        )}
+                                      </button>
+                                      <span className="font-medium">
+                                        S{episode.season}E{episode.episode.toString().padStart(2, '0')}
+                                      </span>
+                                      <span className="text-gray-300">{episode.title}</span>
+                                    </div>
+                                    <div className="text-xs text-gray-400">
+                                      {episode.airDate}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
                 {/* 🔗 Links */}
-                <div className="flex gap-2 text-xs mb-2">
+                <div className="flex gap-2 text-xs mb-2 mt-3">
                   {item.tvmazeUrl && (
                     <a 
                       href={item.tvmazeUrl} 
@@ -561,12 +1042,19 @@ const App = () => {
 
                 {/* 🎮 Action Buttons */}
                 <div className="flex gap-2 mt-3">
-                  {!item.watched && (
+                  {!item.watched ? (
                     <button
                       onClick={() => markAsWatched(item.id, item.type === 'tv' ? item.nextEpisode : null)}
                       className="flex-1 bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
                     >
-                      <Check className="w-3 h-3" /> Mark Watched
+                      <Check className="w-3 h-3" /> Mark Series Watched
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => markSeriesWatched(item.id, false)}
+                      className="flex-1 bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
+                    >
+                      <X className="w-3 h-3" /> Unwatch Series
                     </button>
                   )}
                   <button
