@@ -6,14 +6,50 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Tv, Calendar, Check, X, Play, Clock, Star, Info } from 'lucide-react';
 
+// Define types for better TypeScript support
+interface NextEpisode {
+  season?: number;
+  episode?: number;
+  title?: string;
+  airDate?: string;
+  airTime?: string;
+  runtime?: number;
+  hasNext?: boolean;
+}
+
+interface Show {
+  id: string;
+  title: string;
+  type: string;
+  year: string | number;
+  platform: string;
+  genres: string[];
+  status: string;
+  nextEpisode: NextEpisode | null;
+  poster: string;
+  rating: string | number;
+  summary: string;
+  language: string;
+  runtime: number;
+  premiered: string;
+  officialSite: string;
+  tvmazeUrl: string;
+  tvmazeId: number;
+  addedDate?: string;
+  watched?: boolean;
+  watchedEpisodes?: any[];
+  watchedDate?: string;
+  lastWatchedEpisode?: NextEpisode | null;
+}
+
 const App = () => {
   // 🎬 State management for all our tracking needs
   const [searchQuery, setSearchQuery] = useState(''); // Current search input
-  const [searchResults, setSearchResults] = useState([]); // Results from API search
-  const [watchlist, setWatchlist] = useState([]); // User's saved shows/movies
+  const [searchResults, setSearchResults] = useState<Show[]>([]); // Results from API search
+  const [watchlist, setWatchlist] = useState<Show[]>([]); // User's saved shows/movies
   const [activeTab, setActiveTab] = useState('unwatched'); // Current view tab
   const [loading, setLoading] = useState(false); // Loading state for API calls
-  const [error, setError] = useState(null); // Error handling state
+  const [error, setError] = useState<string | null>(null); // Error handling state
 
   // 💾 Load watchlist from localStorage on component mount
   useEffect(() => {
@@ -79,7 +115,7 @@ const App = () => {
       console.log('📥 Raw API response:', data);
       
       // 🎨 Transform TVmaze data to our format
-      const transformedResults = data.map(item => {
+      const transformedResults: Show[] = data.map((item: any) => {
         const show = item.show;
         console.log('🔄 Transforming show:', show.name);
         
@@ -89,7 +125,7 @@ const App = () => {
                         'Unknown Platform';
         
         // 📅 Get next episode info if available
-        let nextEpisode = null;
+        let nextEpisode: NextEpisode | null = null;
         if (show._links?.nextepisode?.href) {
           // Note: This would require another API call to get full episode details
           // For now, we'll mark that it has upcoming episodes
@@ -128,10 +164,10 @@ const App = () => {
       
     } catch (err) {
       console.error('❌ Search error:', err);
-      console.error('Error details:', err.message);
+      console.error('Error details:', (err as Error).message);
       
       // More specific error messages
-      if (err.message.includes('fetch')) {
+      if ((err as Error).message.includes('fetch')) {
         setError('Network error. Please check your connection and try again.');
       } else {
         setError('Failed to search. Please try again.');
@@ -143,7 +179,7 @@ const App = () => {
   };
 
   // 📅 Fetch next episode information for search results
-  const fetchNextEpisodeInfo = async (shows) => {
+  const fetchNextEpisodeInfo = async (shows: Show[]) => {
     console.log('📅 Fetching next episode info for', shows.length, 'shows');
     
     try {
@@ -187,7 +223,7 @@ const App = () => {
   };
 
   // ➕ Add item to watchlist
-  const addToWatchlist = (item) => {
+  const addToWatchlist = (item: Show) => {
     console.log('➕ Adding to watchlist:', item.title);
     
     // Check if already in watchlist
@@ -196,7 +232,7 @@ const App = () => {
       return;
     }
     
-    const newItem = {
+    const newItem: Show = {
       ...item,
       addedDate: new Date().toISOString(),
       watched: false,
@@ -210,13 +246,13 @@ const App = () => {
   };
 
   // ✅ Mark episode/movie as watched
-  const markAsWatched = (itemId, episodeInfo = null) => {
+  const markAsWatched = (itemId: string, episodeInfo: NextEpisode | null = null) => {
     console.log('✅ Marking as watched:', itemId, episodeInfo);
     
     setWatchlist(watchlist.map(item => {
       if (item.id === itemId) {
         console.log('📺 Marking show/episode as watched');
-        const updatedItem = {
+        const updatedItem: Show = {
           ...item,
           watched: true,
           watchedDate: new Date().toISOString(),
@@ -238,7 +274,7 @@ const App = () => {
   };
 
   // 📅 Fetch next episode for a specific watchlist item
-  const fetchNextEpisodeForItem = async (tvmazeId, itemId) => {
+  const fetchNextEpisodeForItem = async (tvmazeId: number, itemId: string) => {
     console.log('📅 Fetching updated episode info for show ID:', tvmazeId);
     
     try {
@@ -278,7 +314,7 @@ const App = () => {
   };
 
   // 🗑️ Remove from watchlist
-  const removeFromWatchlist = (itemId) => {
+  const removeFromWatchlist = (itemId: string) => {
     console.log('🗑️ Removing from watchlist:', itemId);
     setWatchlist(watchlist.filter(item => item.id !== itemId));
     console.log('✅ Item removed successfully!');
@@ -357,7 +393,7 @@ const App = () => {
                     className="w-20 h-30 object-cover rounded"
                     onError={(e) => {
                       console.log('🖼️ Image failed to load for', result.title);
-                      e.target.src = `https://via.placeholder.com/150x225/8a0707/ffffff?text=${encodeURIComponent(result.title)}`;
+                      (e.target as HTMLImageElement).src = `https://via.placeholder.com/150x225/8a0707/ffffff?text=${encodeURIComponent(result.title)}`;
                     }}
                   />
                   <div className="flex-1">
@@ -494,7 +530,7 @@ const App = () => {
                 {item.watched && !item.nextEpisode && (
                   <div className="bg-green-900 rounded p-2 mb-2">
                     <p className="text-sm flex items-center gap-1">
-                      <Check className="w-3 h-3" /> All caught up! Watched on {new Date(item.watchedDate).toLocaleDateString()}
+                      <Check className="w-3 h-3" /> All caught up! Watched on {item.watchedDate && new Date(item.watchedDate).toLocaleDateString()}
                     </p>
                   </div>
                 )}
@@ -565,4 +601,4 @@ const App = () => {
 };
 
 // 🚀 Export the app component
-export default App;
+export default App; 
