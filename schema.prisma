@@ -1,0 +1,147 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // User's watchlist
+  watchlist UserShow[]
+  
+  // User preferences
+  preferences UserPreferences?
+  
+  @@map("users")
+}
+
+model UserPreferences {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // UI preferences
+  defaultTab                String @default("unwatched") // unwatched, watched, all
+  latestEpisodesSortOrder   String @default("newest")   // newest, oldest  
+  upcomingEpisodesSortOrder String @default("soonest")  // soonest, latest
+  
+  // Feature preferences
+  autoMarkWatched           Boolean @default(false)
+  notificationsEnabled      Boolean @default(true)
+  
+  @@map("user_preferences")
+}
+
+model Show {
+  id          String @id @default(cuid())
+  tvmazeId    Int    @unique
+  title       String
+  type        String @default("tv")
+  year        String
+  platform    String
+  genres      String[] // Array of genre strings
+  status      String
+  poster      String
+  rating      String
+  summary     String @db.Text
+  language    String
+  runtime     Int?
+  premiered   String?
+  officialSite String?
+  tvmazeUrl   String?
+  
+  // Episodes and seasons
+  episodes    Episode[]
+  totalEpisodes Int @default(0)
+  
+  // Show metadata
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastApiUpdate DateTime @default(now())
+  
+  // Users who have this show in their watchlist
+  userShows   UserShow[]
+  
+  @@map("shows")
+}
+
+model Episode {
+  id        Int    @id
+  showId    String
+  show      Show   @relation(fields: [showId], references: [id], onDelete: Cascade)
+  
+  season    Int
+  episode   Int
+  title     String
+  airDate   String
+  airTime   String?
+  runtime   Int?
+  summary   String? @db.Text
+  
+  // User watch progress for this episode
+  userEpisodes UserEpisode[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([showId, season, episode])
+  @@map("episodes")
+}
+
+model UserShow {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  showId   String
+  show     Show   @relation(fields: [showId], references: [id], onDelete: Cascade)
+  
+  // User's progress with this show
+  addedDate        DateTime @default(now())
+  watched          Boolean  @default(false) // Entire show watched
+  watchedDate      String?
+  lastWatchedEpisode String? // JSON string with episode info
+  
+  // UI state
+  expandedSeasons  Int[] // Array of expanded season numbers
+  
+  // User's episode watch progress
+  userEpisodes     UserEpisode[]
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  
+  @@unique([userId, showId])
+  @@map("user_shows")
+}
+
+model UserEpisode {
+  id         String @id @default(cuid())
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  episodeId  Int
+  episode    Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  userShowId String
+  userShow   UserShow @relation(fields: [userShowId], references: [id], onDelete: Cascade)
+  
+  // Watch status
+  watched     Boolean  @default(false)
+  watchedDate DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([userId, episodeId])
+  @@map("user_episodes")
+} 
