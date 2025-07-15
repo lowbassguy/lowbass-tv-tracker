@@ -553,6 +553,8 @@ const App = () => {
         return watchlist.filter(item => !item.watched);
       case 'watched':
         return watchlist.filter(item => item.watched);
+      case 'upcoming':
+        return []; // Upcoming tab shows episodes, not shows
       default:
         return watchlist;
     }
@@ -588,6 +590,84 @@ const App = () => {
     });
     
     return sortedEpisodes.slice(0, 10); // Limit to 10 episodes
+  };
+
+  // 📅 Get upcoming episodes from all tracked shows
+  const getUpcomingEpisodes = () => {
+    console.log('📅 Getting upcoming episodes from all tracked shows...');
+    
+    const upcomingEpisodes: Array<{
+      id: string;
+      showId: string;
+      showTitle: string;
+      showPoster: string;
+      showPlatform: string;
+      season: number;
+      episode: number;
+      title: string;
+      airDate: string;
+      airTime?: string;
+      runtime?: number;
+      daysUntilAir: number;
+      isToday: boolean;
+      isPast: boolean;
+    }> = [];
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    watchlist.forEach(show => {
+      if (show.episodes && show.episodes.length > 0) {
+        // Find episodes with future air dates or episodes that air today
+        const futureEpisodes = show.episodes.filter(episode => {
+          if (!episode.airDate) return false;
+          
+          const airDate = new Date(episode.airDate);
+          const airDateOnly = new Date(airDate.getFullYear(), airDate.getMonth(), airDate.getDate());
+          
+          // Include episodes that air today or in the future
+          return airDateOnly >= today;
+        });
+
+        // Sort by air date and take the next few episodes
+        futureEpisodes
+          .sort((a, b) => new Date(a.airDate).getTime() - new Date(b.airDate).getTime())
+          .slice(0, 5) // Limit to next 5 episodes per show
+          .forEach(episode => {
+            const airDate = new Date(episode.airDate);
+            const airDateOnly = new Date(airDate.getFullYear(), airDate.getMonth(), airDate.getDate());
+            const timeDiff = airDateOnly.getTime() - today.getTime();
+            const daysUntilAir = Math.ceil(timeDiff / (1000 * 3600 * 24));
+            
+            upcomingEpisodes.push({
+              id: `${show.id}-${episode.id}`,
+              showId: show.id,
+              showTitle: show.title,
+              showPoster: show.poster,
+              showPlatform: show.platform,
+              season: episode.season,
+              episode: episode.episode,
+              title: episode.title,
+              airDate: episode.airDate,
+              airTime: episode.airTime,
+              runtime: episode.runtime,
+              daysUntilAir,
+              isToday: daysUntilAir === 0,
+              isPast: daysUntilAir < 0
+            });
+          });
+      }
+    });
+
+    // Sort by air date (closest first)
+    const sortedEpisodes = upcomingEpisodes.sort((a, b) => {
+      const dateA = new Date(a.airDate);
+      const dateB = new Date(b.airDate);
+      return dateA.getTime() - dateB.getTime();
+    });
+
+    console.log('📅 Found', sortedEpisodes.length, 'upcoming episodes');
+    return sortedEpisodes;
   };
 
   // 🔄 Toggle show expansion
@@ -935,10 +1015,101 @@ const App = () => {
           >
             📚 All ({watchlist.length})
           </button>
+          <button
+            onClick={() => {
+              console.log('📑 Switching to upcoming tab');
+              setActiveTab('upcoming');
+            }}
+            className={`px-4 py-2 rounded font-semibold transition-colors ${
+              activeTab === 'upcoming' 
+                ? 'bg-red-700 text-white' 
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+            }`}
+          >
+            📅 Upcoming ({getUpcomingEpisodes().length})
+          </button>
         </div>
 
-        {/* 📺 Watchlist Display with Episode Tracking */}
-        <div className="space-y-2">
+        {/* 📅 Upcoming Episodes Display */}
+        {activeTab === 'upcoming' ? (
+          <div className="space-y-3">
+            {getUpcomingEpisodes().length > 0 ? (
+              getUpcomingEpisodes().map((episode) => (
+                <div key={episode.id} className="bg-gray-900 border border-red-900 rounded-lg p-4">
+                  <div className="flex items-start gap-4">
+                    {/* Show Poster */}
+                    <div className="flex-shrink-0">
+                      <img 
+                        src={episode.showPoster} 
+                        alt={episode.showTitle}
+                        className="w-16 h-24 object-cover rounded"
+                      />
+                    </div>
+                    
+                    {/* Episode Details */}
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-2">
+                        <h3 className="font-semibold text-white">{episode.showTitle}</h3>
+                        <span className="text-xs text-gray-400">{episode.showPlatform}</span>
+                      </div>
+                      
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="bg-red-700 text-white px-2 py-1 rounded text-xs font-medium">
+                          S{episode.season}E{episode.episode.toString().padStart(2, '0')}
+                        </span>
+                        <span className="text-sm text-gray-300">{episode.title}</span>
+                      </div>
+                      
+                      <div className="flex items-center gap-4 text-sm">
+                        <div className="flex items-center gap-1 text-gray-400">
+                          <Calendar className="w-4 h-4" />
+                          <span>{new Date(episode.airDate).toLocaleDateString()}</span>
+                          {episode.airTime && <span>at {episode.airTime}</span>}
+                        </div>
+                        
+                        {episode.runtime && (
+                          <div className="flex items-center gap-1 text-gray-400">
+                            <Clock className="w-4 h-4" />
+                            <span>{episode.runtime} min</span>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Days until air indicator */}
+                      <div className="mt-2">
+                        {episode.isToday ? (
+                          <span className="bg-green-700 text-white px-2 py-1 rounded text-xs font-medium">
+                            🎬 Airs Today!
+                          </span>
+                        ) : episode.daysUntilAir === 1 ? (
+                          <span className="bg-yellow-700 text-white px-2 py-1 rounded text-xs font-medium">
+                            📅 Tomorrow
+                          </span>
+                        ) : episode.daysUntilAir <= 7 ? (
+                          <span className="bg-orange-700 text-white px-2 py-1 rounded text-xs font-medium">
+                            📅 In {episode.daysUntilAir} days
+                          </span>
+                        ) : (
+                          <span className="bg-gray-700 text-gray-300 px-2 py-1 rounded text-xs font-medium">
+                            📅 In {episode.daysUntilAir} days
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>No upcoming episodes found!</p>
+                <p className="text-sm mt-1">Add some shows to your watchlist to see their upcoming episodes.</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* 📺 Watchlist Display with Episode Tracking */
+          <div className="space-y-2">
           {getFilteredItems().map(item => (
             <div key={item.id} className="bg-gray-900 border border-red-900 rounded-lg overflow-hidden">
               <button
@@ -1150,9 +1321,10 @@ const App = () => {
             </div>
           ))}
         </div>
+        )}
 
         {/* 📭 Empty State */}
-        {getFilteredItems().length === 0 && (
+        {activeTab !== 'upcoming' && getFilteredItems().length === 0 && (
           <div className="text-center py-12 text-gray-500">
             <Info className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>No shows in this category yet!</p>
