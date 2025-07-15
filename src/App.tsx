@@ -79,6 +79,7 @@ const App = () => {
   const [error, setError] = useState<string | null>(null); // Error handling state
   const [expandedShows, setExpandedShows] = useState<Set<string>>(new Set()); // Track which shows are expanded
   const [latestEpisodesSortOrder, setLatestEpisodesSortOrder] = useState<'newest' | 'oldest'>('newest'); // Sort order for latest episodes
+  const [upcomingEpisodesSortOrder, setUpcomingEpisodesSortOrder] = useState<'soonest' | 'latest'>('soonest'); // Sort order for upcoming episodes
 
   // 💾 Load watchlist from localStorage on component mount
   useEffect(() => {
@@ -590,6 +591,39 @@ const App = () => {
     return sortedEpisodes.slice(0, 10); // Limit to 10 episodes
   };
 
+  // 📅 Get upcoming unaired episodes across all shows
+  const getUpcomingUnwatchedEpisodes = () => {
+    console.log('📅 Getting upcoming unaired episodes...');
+    
+    const allUpcomingEpisodes: (Episode & { showTitle: string; showId: string })[] = [];
+    const now = new Date();
+    
+    watchlist.forEach(show => {
+      if (!show.watched && show.episodes) {
+        const upcomingEpisodes = show.episodes
+          .filter(ep => !ep.watched && new Date(ep.airDate) > now)
+          .map(ep => ({
+            ...ep,
+            showTitle: show.title,
+            showId: show.id
+          }));
+        
+        allUpcomingEpisodes.push(...upcomingEpisodes);
+      }
+    });
+    
+    // Sort by air date based on selected sort order
+    const sortedEpisodes = allUpcomingEpisodes.sort((a, b) => {
+      if (upcomingEpisodesSortOrder === 'soonest') {
+        return new Date(a.airDate).getTime() - new Date(b.airDate).getTime(); // Soonest first
+      } else {
+        return new Date(b.airDate).getTime() - new Date(a.airDate).getTime(); // Latest first
+      }
+    });
+    
+    return sortedEpisodes.slice(0, 10); // Limit to 10 episodes
+  };
+
   // 🔄 Toggle show expansion
   const toggleShowExpansion = (showId: string) => {
     console.log('🔄 Toggling show expansion for', showId);
@@ -875,6 +909,63 @@ const App = () => {
                       >
                         <Circle className="w-4 h-4 text-gray-400" />
                       </button>
+                      <span className="text-sm font-medium text-gray-300">
+                        {episode.showTitle}
+                      </span>
+                    </div>
+                    <span className="text-xs text-gray-500">
+                      {new Date(episode.airDate).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="ml-6">
+                    <p className="text-sm text-white">
+                      S{episode.season}E{episode.episode.toString().padStart(2, '0')}: {episode.title}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 📅 Upcoming Unaired Episodes */}
+        {getUpcomingUnwatchedEpisodes().length > 0 && (
+          <div className="bg-gray-900 border border-red-900 rounded-lg p-4 mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Calendar className="w-5 h-5" />
+                Upcoming Unaired Episodes
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-400">Sort by:</span>
+                <button
+                  onClick={() => setUpcomingEpisodesSortOrder(upcomingEpisodesSortOrder === 'soonest' ? 'latest' : 'soonest')}
+                  className={`px-3 py-1 rounded text-sm transition-colors ${
+                    upcomingEpisodesSortOrder === 'soonest' 
+                      ? 'bg-red-700 text-white' 
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Soonest
+                </button>
+                <button
+                  onClick={() => setUpcomingEpisodesSortOrder(upcomingEpisodesSortOrder === 'latest' ? 'soonest' : 'latest')}
+                  className={`px-3 py-1 rounded text-sm transition-colors ${
+                    upcomingEpisodesSortOrder === 'latest' 
+                      ? 'bg-red-700 text-white' 
+                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  }`}
+                >
+                  Latest
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {getUpcomingUnwatchedEpisodes().map((episode, index) => (
+                <div key={`${episode.showId}-${episode.id}`} className="bg-black border border-gray-700 rounded p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Circle className="w-4 h-4 text-gray-400" />
                       <span className="text-sm font-medium text-gray-300">
                         {episode.showTitle}
                       </span>
