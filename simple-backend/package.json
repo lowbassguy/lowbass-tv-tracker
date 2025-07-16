@@ -1,0 +1,18 @@
+{
+  "name": "tv-tracker-simple-backend",
+  "version": "1.0.0",
+  "description": "Simple SQLite backend for TV Tracker",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "sqlite3": "^5.1.6",
+    "cors": "^2.8.5"
+  },
+  "keywords": ["tv", "tracker", "sqlite"],
+  "author": "lowbass",
+  "license": "MIT"
+} 

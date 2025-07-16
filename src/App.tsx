@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Search, Tv, Calendar, Check, X, Play, Clock, Star, Info, ChevronDown, ChevronUp, CheckCircle, Circle } from 'lucide-react';
+import { apiClient } from './services/api';
 
 // Define types for better TypeScript support
 interface Episode {
@@ -81,21 +82,21 @@ const App = () => {
   const [latestEpisodesSortOrder, setLatestEpisodesSortOrder] = useState<'newest' | 'oldest'>('newest'); // Sort order for latest episodes
   const [upcomingEpisodesSortOrder, setUpcomingEpisodesSortOrder] = useState<'soonest' | 'latest'>('soonest'); // Sort order for upcoming episodes
 
-  // 💾 Load watchlist from localStorage on component mount
+  // 💾 Load watchlist from database on component mount
   useEffect(() => {
-    console.log('📂 Loading watchlist from localStorage...');
-    try {
-      const savedWatchlist = localStorage.getItem('lowbass-watchlist');
-      if (savedWatchlist) {
-        setWatchlist(JSON.parse(savedWatchlist));
-        console.log('✅ Watchlist loaded successfully!', JSON.parse(savedWatchlist));
-      } else {
-        console.log('📭 No saved watchlist found, starting fresh!');
+    const loadWatchlist = async () => {
+      console.log('📂 Loading watchlist from database...');
+      try {
+        const watchlist = await apiClient.loadWatchlist();
+        setWatchlist(watchlist);
+        console.log('✅ Watchlist loaded successfully!', watchlist);
+      } catch (err) {
+        console.error('❌ Error loading watchlist:', err);
+        setError('Failed to load saved data');
       }
-    } catch (err) {
-      console.error('❌ Error loading watchlist:', err);
-      setError('Failed to load saved data');
-    }
+    };
+    
+    loadWatchlist();
     
     // 🧹 Cleanup function
     return () => {
@@ -186,16 +187,7 @@ const App = () => {
     };
   }, [watchlist.length]); // Only depend on watchlist length to avoid infinite loops
 
-  // 💾 Save watchlist to localStorage whenever it changes
-  useEffect(() => {
-    console.log('💾 Saving watchlist to localStorage...');
-    try {
-      localStorage.setItem('lowbass-watchlist', JSON.stringify(watchlist));
-      console.log('✅ Watchlist saved successfully!');
-    } catch (err) {
-      console.error('❌ Error saving watchlist:', err);
-    }
-  }, [watchlist]);
+  // Note: Watchlist is now saved to database immediately when changed (no auto-save useEffect needed)
 
   // 🔍 Search for shows using TVmaze API
   const handleSearch = async () => {
@@ -463,6 +455,14 @@ const App = () => {
     setSearchQuery(''); // Clear search input
     console.log('✅ Successfully added to watchlist!');
     
+    // Save to database
+    try {
+      await apiClient.saveShow(newItem);
+      console.log('✅ Show saved to database');
+    } catch (err) {
+      console.error('❌ Error saving show to database:', err);
+    }
+    
     // Fetch episode data in background
     try {
       console.log('📺 Fetching episode data for', item.title);
@@ -472,15 +472,20 @@ const App = () => {
       setWatchlist(prevWatchlist => 
         prevWatchlist.map(w => w.id === item.id ? updatedItem : w)
       );
-      console.log('✅ Episode data loaded for', item.title);
+      
+      // Save updated show to database
+      await apiClient.updateShow(updatedItem);
+      console.log('✅ Episode data loaded and saved to database for', item.title);
     } catch (err) {
       console.error('❌ Error loading episode data:', err);
     }
   };
 
   // 📺 Mark entire series as watched/unwatched
-  const markSeriesWatched = (showId: string, watched: boolean) => {
+  const markSeriesWatched = async (showId: string, watched: boolean) => {
     console.log('📺 Marking entire series as', watched ? 'watched' : 'unwatched', 'for show', showId);
+    
+    let updatedShow: Show | null = null;
     
     setWatchlist(prevWatchlist => 
       prevWatchlist.map(show => {
@@ -510,7 +515,7 @@ const App = () => {
             hasNext: true
           } : null;
           
-          return {
+          updatedShow = {
             ...show,
             episodes: updatedEpisodes,
             seasons: updatedSeasons,
@@ -520,18 +525,30 @@ const App = () => {
             lastUpdated: new Date().toISOString(),
             watchedDate: watched ? new Date().toISOString() : undefined
           };
+          
+          return updatedShow;
         }
         return show;
       })
     );
+    
+    // Save to database
+    if (updatedShow) {
+      try {
+        await apiClient.updateShow(updatedShow);
+        console.log('✅ Show watch status updated in database');
+      } catch (err) {
+        console.error('❌ Error updating show in database:', err);
+      }
+    }
   };
 
   // ✅ Mark episode/movie as watched (updated to use new system)
-  const markAsWatched = (itemId: string, episodeInfo: NextEpisode | null = null) => {
+  const markAsWatched = async (itemId: string, episodeInfo: NextEpisode | null = null) => {
     console.log('✅ Marking as watched:', itemId, episodeInfo);
     
     // Use the new series marking function
-    markSeriesWatched(itemId, true);
+    await markSeriesWatched(itemId, true);
     
     console.log('✅ Watch status updated!');
   };
@@ -539,10 +556,19 @@ const App = () => {
   // Note: fetchNextEpisodeForItem function removed as it's replaced by the new episode tracking system
 
   // 🗑️ Remove from watchlist
-  const removeFromWatchlist = (itemId: string) => {
+  const removeFromWatchlist = async (itemId: string) => {
     console.log('🗑️ Removing from watchlist:', itemId);
+    
+    // Remove from state immediately for better UX
     setWatchlist(watchlist.filter(item => item.id !== itemId));
-    console.log('✅ Item removed successfully!');
+    
+    // Remove from database
+    try {
+      await apiClient.removeShow(itemId);
+      console.log('✅ Item removed from database successfully!');
+    } catch (err) {
+      console.error('❌ Error removing item from database:', err);
+    }
   };
 
   // 🎯 Filter items based on active tab
@@ -662,8 +688,10 @@ const App = () => {
   };
 
   // 📺 Toggle individual episode watched status
-  const toggleEpisodeWatched = (showId: string, episodeId: number) => {
+  const toggleEpisodeWatched = async (showId: string, episodeId: number) => {
     console.log('📺 Toggling episode watched status for show', showId, 'episode', episodeId);
+    
+    let updatedShow: Show | null = null;
     
     setWatchlist(prevWatchlist => 
       prevWatchlist.map(show => {
@@ -698,7 +726,7 @@ const App = () => {
             hasNext: true
           } : null;
           
-          return {
+          updatedShow = {
             ...show,
             episodes: updatedEpisodes,
             seasons: updatedSeasons,
@@ -707,15 +735,29 @@ const App = () => {
             nextEpisode,
             lastUpdated: new Date().toISOString()
           };
+          
+          return updatedShow;
         }
         return show;
       })
     );
+    
+    // Save to database
+    if (updatedShow) {
+      try {
+        await apiClient.updateShow(updatedShow);
+        console.log('✅ Episode watch status updated in database');
+      } catch (err) {
+        console.error('❌ Error updating episode in database:', err);
+      }
+    }
   };
 
   // 🗂️ Mark entire season as watched/unwatched
-  const markSeasonWatched = (showId: string, seasonNumber: number, watched: boolean) => {
+  const markSeasonWatched = async (showId: string, seasonNumber: number, watched: boolean) => {
     console.log('🗂️ Marking season', seasonNumber, 'as', watched ? 'watched' : 'unwatched', 'for show', showId);
+    
+    let updatedShow: Show | null = null;
     
     setWatchlist(prevWatchlist => 
       prevWatchlist.map(show => {
@@ -750,7 +792,7 @@ const App = () => {
             hasNext: true
           } : null;
           
-          return {
+          updatedShow = {
             ...show,
             episodes: updatedEpisodes,
             seasons: updatedSeasons,
@@ -759,10 +801,22 @@ const App = () => {
             nextEpisode,
             lastUpdated: new Date().toISOString()
           };
+          
+          return updatedShow;
         }
         return show;
       })
     );
+    
+    // Save to database
+    if (updatedShow) {
+      try {
+        await apiClient.updateShow(updatedShow);
+        console.log('✅ Season watch status updated in database');
+      } catch (err) {
+        console.error('❌ Error updating season in database:', err);
+      }
+    }
   };
 
   // 🎨 Main render function
