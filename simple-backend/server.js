@@ -3,11 +3,11 @@ const cors = require('cors');
 const db = require('./database');
 
 const app = express();
-const PORT = 3001;
+const PORT = 3002;
 
 // Middleware
 app.use(cors({
-  origin: 'http://localhost:5173' // Frontend URL
+  origin: ['http://localhost:5173', 'http://localhost:3000'] // Frontend URLs
 }));
 app.use(express.json({ limit: '10mb' }));
 
