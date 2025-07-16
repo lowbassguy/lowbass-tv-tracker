@@ -152,6 +152,16 @@ const App = () => {
           })
         );
         
+        // Save updated shows to database
+        try {
+          await Promise.all(
+            updates.map(updatedShow => apiClient.updateShow(updatedShow))
+          );
+          console.log('✅ Daily updates saved to database');
+        } catch (err) {
+          console.error('❌ Error saving daily updates to database:', err);
+        }
+        
         // Add delay between batches to be respectful to the API
         if (i + batchSize < showsToUpdate.length) {
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -161,8 +171,8 @@ const App = () => {
       console.log('✅ Daily update completed!');
     };
     
-    // Run on component mount
-    updateShowsDaily();
+    // Run on component mount - TEMPORARILY DISABLED FOR TESTING
+    // updateShowsDaily();
     
     // Set up daily update at midnight
     const scheduleNextUpdate = () => {
@@ -393,7 +403,18 @@ const App = () => {
   const updateShowWithEpisodes = async (show: Show): Promise<Show> => {
     console.log('🔄 Updating show with episode data:', show.title);
     
-    const episodes = await fetchEpisodeList(show.tvmazeId);
+    const freshEpisodes = await fetchEpisodeList(show.tvmazeId);
+    
+    // Preserve user's watch status by merging with existing episode data
+    const episodes = freshEpisodes.map(freshEp => {
+      const existingEp = show.episodes.find(ep => ep.id === freshEp.id);
+      return {
+        ...freshEp,
+        watched: existingEp?.watched || false,
+        watchedDate: existingEp?.watchedDate || undefined
+      };
+    });
+    
     const seasons = organizeEpisodesIntoSeasons(episodes);
     
     // Find next unwatched episode
@@ -691,65 +712,70 @@ const App = () => {
   const toggleEpisodeWatched = async (showId: string, episodeId: number) => {
     console.log('📺 Toggling episode watched status for show', showId, 'episode', episodeId);
     
-    let updatedShow: Show | null = null;
+    // First, find the current show and create the updated version
+    const currentShow = watchlist.find(show => show.id === showId);
+    if (!currentShow) {
+      console.error('❌ Show not found in watchlist');
+      return;
+    }
     
+    // Create updated episodes
+    const updatedEpisodes = currentShow.episodes.map(episode => {
+      if (episode.id === episodeId) {
+        return {
+          ...episode,
+          watched: !episode.watched,
+          watchedDate: !episode.watched ? new Date().toISOString() : undefined
+        };
+      }
+      return episode;
+    });
+    
+    // Recalculate seasons with updated watched counts
+    const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
+    
+    // Calculate overall stats
+    const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
+    const totalEpisodes = updatedEpisodes.length;
+    
+    // Find next unwatched episode
+    const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
+    const nextEpisode = nextUnwatched ? {
+      season: nextUnwatched.season,
+      episode: nextUnwatched.episode,
+      title: nextUnwatched.title,
+      airDate: nextUnwatched.airDate,
+      airTime: nextUnwatched.airTime,
+      runtime: nextUnwatched.runtime,
+      hasNext: true
+    } : null;
+    
+    // Create the updated show object
+    const updatedShow: Show = {
+      ...currentShow,
+      episodes: updatedEpisodes,
+      seasons: updatedSeasons,
+      watchedEpisodesCount: watchedCount,
+      watched: watchedCount === totalEpisodes && totalEpisodes > 0,
+      nextEpisode,
+      lastUpdated: new Date().toISOString()
+    };
+    
+    // Update the state
     setWatchlist(prevWatchlist => 
-      prevWatchlist.map(show => {
-        if (show.id === showId) {
-          const updatedEpisodes = show.episodes.map(episode => {
-            if (episode.id === episodeId) {
-              return {
-                ...episode,
-                watched: !episode.watched,
-                watchedDate: !episode.watched ? new Date().toISOString() : undefined
-              };
-            }
-            return episode;
-          });
-          
-          // Recalculate seasons with updated watched counts
-          const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
-          
-          // Calculate overall stats
-          const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
-          const totalEpisodes = updatedEpisodes.length;
-          
-          // Find next unwatched episode
-          const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
-          const nextEpisode = nextUnwatched ? {
-            season: nextUnwatched.season,
-            episode: nextUnwatched.episode,
-            title: nextUnwatched.title,
-            airDate: nextUnwatched.airDate,
-            airTime: nextUnwatched.airTime,
-            runtime: nextUnwatched.runtime,
-            hasNext: true
-          } : null;
-          
-          updatedShow = {
-            ...show,
-            episodes: updatedEpisodes,
-            seasons: updatedSeasons,
-            watchedEpisodesCount: watchedCount,
-            watched: watchedCount === totalEpisodes && totalEpisodes > 0,
-            nextEpisode,
-            lastUpdated: new Date().toISOString()
-          };
-          
-          return updatedShow;
-        }
-        return show;
-      })
+      prevWatchlist.map(show => 
+        show.id === showId ? updatedShow : show
+      )
     );
     
     // Save to database
-    if (updatedShow) {
-      try {
-        await apiClient.updateShow(updatedShow);
-        console.log('✅ Episode watch status updated in database');
-      } catch (err) {
-        console.error('❌ Error updating episode in database:', err);
-      }
+    console.log('🔄 About to save to database, updatedShow exists:', !!updatedShow);
+    try {
+      console.log('🔄 Calling API to update show...');
+      await apiClient.updateShow(updatedShow);
+      console.log('✅ Episode watch status updated in database');
+    } catch (err) {
+      console.error('❌ Error updating episode in database:', err);
     }
   };
 
