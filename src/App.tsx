@@ -506,61 +506,73 @@ const App = () => {
   const markSeriesWatched = async (showId: string, watched: boolean) => {
     console.log('📺 Marking entire series as', watched ? 'watched' : 'unwatched', 'for show', showId);
     
-    let updatedShow: Show | null = null;
+    // Find the current show
+    const currentShow = watchlist.find(show => show.id === showId);
+    if (!currentShow) {
+      console.error('❌ Show not found in watchlist');
+      return;
+    }
     
+    const now = new Date();
+    
+    // Create updated episodes - only mark aired episodes when marking as watched
+    const updatedEpisodes = currentShow.episodes.map(episode => {
+      // Only mark as watched if the episode has aired (or if we're unmarking)
+      const hasAired = new Date(episode.airDate) <= now;
+      const shouldMarkWatched = watched ? hasAired : false;
+      
+      return {
+        ...episode,
+        watched: shouldMarkWatched,
+        watchedDate: shouldMarkWatched ? new Date().toISOString() : undefined
+      };
+    });
+    
+    // Recalculate seasons with updated watched counts
+    const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
+    
+    // Calculate overall stats
+    const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
+    const totalEpisodes = updatedEpisodes.length;
+    
+    // Find next unwatched episode
+    const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= now);
+    const nextEpisode = nextUnwatched ? {
+      season: nextUnwatched.season,
+      episode: nextUnwatched.episode,
+      title: nextUnwatched.title,
+      airDate: nextUnwatched.airDate,
+      airTime: nextUnwatched.airTime,
+      runtime: nextUnwatched.runtime,
+      hasNext: true
+    } : null;
+    
+    // Create the updated show object
+    const updatedShow: Show = {
+      ...currentShow,
+      episodes: updatedEpisodes,
+      seasons: updatedSeasons,
+      watchedEpisodesCount: watchedCount,
+      watched: watchedCount === totalEpisodes && totalEpisodes > 0,
+      nextEpisode,
+      lastUpdated: new Date().toISOString(),
+      watchedDate: watched ? new Date().toISOString() : undefined
+    };
+    
+    // Update the state
     setWatchlist(prevWatchlist => 
-      prevWatchlist.map(show => {
-        if (show.id === showId) {
-          const updatedEpisodes = show.episodes.map(episode => ({
-            ...episode,
-            watched,
-            watchedDate: watched ? new Date().toISOString() : undefined
-          }));
-          
-          // Recalculate seasons with updated watched counts
-          const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
-          
-          // Calculate overall stats
-          const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
-          const totalEpisodes = updatedEpisodes.length;
-          
-          // Find next unwatched episode
-          const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
-          const nextEpisode = nextUnwatched ? {
-            season: nextUnwatched.season,
-            episode: nextUnwatched.episode,
-            title: nextUnwatched.title,
-            airDate: nextUnwatched.airDate,
-            airTime: nextUnwatched.airTime,
-            runtime: nextUnwatched.runtime,
-            hasNext: true
-          } : null;
-          
-          updatedShow = {
-            ...show,
-            episodes: updatedEpisodes,
-            seasons: updatedSeasons,
-            watchedEpisodesCount: watchedCount,
-            watched: watchedCount === totalEpisodes && totalEpisodes > 0,
-            nextEpisode,
-            lastUpdated: new Date().toISOString(),
-            watchedDate: watched ? new Date().toISOString() : undefined
-          };
-          
-          return updatedShow;
-        }
-        return show;
-      })
+      prevWatchlist.map(show => 
+        show.id === showId ? updatedShow : show
+      )
     );
     
     // Save to database
-    if (updatedShow) {
-      try {
-        await apiClient.updateShow(updatedShow);
-        console.log('✅ Show watch status updated in database');
-      } catch (err) {
-        console.error('❌ Error updating show in database:', err);
-      }
+    try {
+      console.log('🔄 Saving series watch status to database...');
+      await apiClient.updateShow(updatedShow);
+      console.log('✅ Show watch status updated in database');
+    } catch (err) {
+      console.error('❌ Error updating show in database:', err);
     }
   };
 
@@ -783,65 +795,75 @@ const App = () => {
   const markSeasonWatched = async (showId: string, seasonNumber: number, watched: boolean) => {
     console.log('🗂️ Marking season', seasonNumber, 'as', watched ? 'watched' : 'unwatched', 'for show', showId);
     
-    let updatedShow: Show | null = null;
+    // Find the current show
+    const currentShow = watchlist.find(show => show.id === showId);
+    if (!currentShow) {
+      console.error('❌ Show not found in watchlist');
+      return;
+    }
     
+    const now = new Date();
+    
+    // Create updated episodes - only mark aired episodes in the season
+    const updatedEpisodes = currentShow.episodes.map(episode => {
+      if (episode.season === seasonNumber) {
+        // Only mark as watched if the episode has aired (or if we're unmarking)
+        const hasAired = new Date(episode.airDate) <= now;
+        const shouldMarkWatched = watched ? hasAired : false;
+        
+        return {
+          ...episode,
+          watched: shouldMarkWatched,
+          watchedDate: shouldMarkWatched ? new Date().toISOString() : undefined
+        };
+      }
+      return episode;
+    });
+    
+    // Recalculate seasons with updated watched counts
+    const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
+    
+    // Calculate overall stats
+    const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
+    const totalEpisodes = updatedEpisodes.length;
+    
+    // Find next unwatched episode
+    const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= now);
+    const nextEpisode = nextUnwatched ? {
+      season: nextUnwatched.season,
+      episode: nextUnwatched.episode,
+      title: nextUnwatched.title,
+      airDate: nextUnwatched.airDate,
+      airTime: nextUnwatched.airTime,
+      runtime: nextUnwatched.runtime,
+      hasNext: true
+    } : null;
+    
+    // Create the updated show object
+    const updatedShow: Show = {
+      ...currentShow,
+      episodes: updatedEpisodes,
+      seasons: updatedSeasons,
+      watchedEpisodesCount: watchedCount,
+      watched: watchedCount === totalEpisodes && totalEpisodes > 0,
+      nextEpisode,
+      lastUpdated: new Date().toISOString()
+    };
+    
+    // Update the state
     setWatchlist(prevWatchlist => 
-      prevWatchlist.map(show => {
-        if (show.id === showId) {
-          const updatedEpisodes = show.episodes.map(episode => {
-            if (episode.season === seasonNumber) {
-              return {
-                ...episode,
-                watched,
-                watchedDate: watched ? new Date().toISOString() : undefined
-              };
-            }
-            return episode;
-          });
-          
-          // Recalculate seasons with updated watched counts
-          const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
-          
-          // Calculate overall stats
-          const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
-          const totalEpisodes = updatedEpisodes.length;
-          
-          // Find next unwatched episode
-          const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
-          const nextEpisode = nextUnwatched ? {
-            season: nextUnwatched.season,
-            episode: nextUnwatched.episode,
-            title: nextUnwatched.title,
-            airDate: nextUnwatched.airDate,
-            airTime: nextUnwatched.airTime,
-            runtime: nextUnwatched.runtime,
-            hasNext: true
-          } : null;
-          
-          updatedShow = {
-            ...show,
-            episodes: updatedEpisodes,
-            seasons: updatedSeasons,
-            watchedEpisodesCount: watchedCount,
-            watched: watchedCount === totalEpisodes && totalEpisodes > 0,
-            nextEpisode,
-            lastUpdated: new Date().toISOString()
-          };
-          
-          return updatedShow;
-        }
-        return show;
-      })
+      prevWatchlist.map(show => 
+        show.id === showId ? updatedShow : show
+      )
     );
     
     // Save to database
-    if (updatedShow) {
-      try {
-        await apiClient.updateShow(updatedShow);
-        console.log('✅ Season watch status updated in database');
-      } catch (err) {
-        console.error('❌ Error updating season in database:', err);
-      }
+    try {
+      console.log('🔄 Saving season watch status to database...');
+      await apiClient.updateShow(updatedShow);
+      console.log('✅ Season watch status updated in database');
+    } catch (err) {
+      console.error('❌ Error updating season in database:', err);
     }
   };
 
