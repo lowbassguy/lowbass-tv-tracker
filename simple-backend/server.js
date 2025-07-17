@@ -1,5 +1,7 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const basicAuth = require('express-basic-auth');
 const db = require('./database');
 
 const app = express();
@@ -7,9 +9,23 @@ const PORT = 3002;
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'] // Frontend URLs
+  origin: ['http://localhost:5173', 'http://localhost:3000'], // Frontend URLs
+  credentials: true // Allow credentials (cookies, authorization headers)
 }));
 app.use(express.json({ limit: '10mb' }));
+
+// Basic Authentication - only if credentials are provided
+if (process.env.AUTH_USERNAME && process.env.AUTH_PASSWORD) {
+  console.log('🔒 Basic authentication enabled');
+  app.use(basicAuth({
+    users: { [process.env.AUTH_USERNAME]: process.env.AUTH_PASSWORD },
+    challenge: true,
+    realm: 'TV Tracker'
+  }));
+} else {
+  console.log('⚠️  No authentication configured - app is unsecured');
+  console.log('   Set AUTH_USERNAME and AUTH_PASSWORD environment variables to enable security');
+}
 
 // Utility function to serialize show data for database
 const serializeShow = (show) => ({
