@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: lowbass-tv-tracker
+    runtime: node
+    plan: free
+    buildCommand: npm install && cd simple-backend && npm install && cd .. && npm run build
+    startCommand: npm start --prefix simple-backend
+    healthCheckPath: /api/health
+    disk:
+      name: tv-tracker-data
+      mountPath: /app/simple-backend
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production 
