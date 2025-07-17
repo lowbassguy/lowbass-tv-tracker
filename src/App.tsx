@@ -918,45 +918,67 @@ const App = () => {
           {/* 🔍 Search Results */}
           {searchResults.length > 0 && (
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {searchResults.map(result => (
-                <div key={result.id} className="bg-black border border-red-900 rounded-lg p-3 flex gap-3">
-                  <img 
-                    src={result.poster} 
-                    alt={result.title}
-                    className="w-20 h-30 object-cover rounded"
-                    onError={(e) => {
-                      console.log('🖼️ Image failed to load for', result.title);
-                      (e.target as HTMLImageElement).src = `https://via.placeholder.com/150x225/8a0707/ffffff?text=${encodeURIComponent(result.title)}`;
-                    }}
-                  />
-                  <div className="flex-1">
-                    <h3 className="font-semibold flex items-center gap-2">
-                      <Tv className="w-4 h-4" />
-                      {result.title}
-                    </h3>
-                    <p className="text-sm text-gray-400">
-                      {result.year} • {result.platform} • {result.status}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      {result.genres.slice(0, 3).join(', ')}
-                    </p>
-                    <p className="text-sm text-yellow-500 flex items-center gap-1 mt-1">
-                      <Star className="w-3 h-3" /> {result.rating}/10
-                    </p>
-                    {result.nextEpisode && result.nextEpisode.season && (
-                      <p className="text-xs text-green-400 mt-1">
-                        📺 Next: S{result.nextEpisode.season}E{result.nextEpisode.episode} - {result.nextEpisode.airDate}
+              {searchResults.map(result => {
+                const isInWatchlist = watchlist.find(w => w.id === result.id);
+                return (
+                  <div key={result.id} className="bg-black border border-red-900 rounded-lg p-3 flex gap-3">
+                    <img 
+                      src={result.poster} 
+                      alt={result.title}
+                      className="w-20 h-30 object-cover rounded"
+                      onError={(e) => {
+                        console.log('🖼️ Image failed to load for', result.title);
+                        (e.target as HTMLImageElement).src = `https://via.placeholder.com/150x225/8a0707/ffffff?text=${encodeURIComponent(result.title)}`;
+                      }}
+                    />
+                    <div className="flex-1">
+                      <h3 className="font-semibold flex items-center gap-2">
+                        <Tv className="w-4 h-4" />
+                        {result.title}
+                        {isInWatchlist && (
+                          <span className="bg-green-600 text-white text-xs px-2 py-1 rounded-full">
+                            ✓ In Watchlist
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-sm text-gray-400">
+                        {result.year} • {result.platform} • {result.status}
                       </p>
-                    )}
-                    <button
-                      onClick={() => addToWatchlist(result)}
-                      className="mt-2 bg-red-700 hover:bg-red-600 px-3 py-1 rounded text-sm"
-                    >
-                      ➕ Add to Watchlist
-                    </button>
+                      <p className="text-sm text-gray-500">
+                        {result.genres.slice(0, 3).join(', ')}
+                      </p>
+                      <p className="text-sm text-yellow-500 flex items-center gap-1 mt-1">
+                        <Star className="w-3 h-3" /> {result.rating}/10
+                      </p>
+                      {result.nextEpisode && result.nextEpisode.season && (
+                        <p className="text-xs text-green-400 mt-1">
+                          📺 Next: S{result.nextEpisode.season}E{result.nextEpisode.episode} - {result.nextEpisode.airDate}
+                        </p>
+                      )}
+                      {!isInWatchlist ? (
+                        <button
+                          onClick={() => addToWatchlist(result)}
+                          className="mt-2 bg-red-700 hover:bg-red-600 px-3 py-1 rounded text-sm"
+                        >
+                          ➕ Add to Watchlist
+                        </button>
+                      ) : (
+                        <div className="mt-2 flex gap-2">
+                          <div className="bg-gray-600 px-3 py-1 rounded text-sm text-gray-300">
+                            ✓ Already in Watchlist
+                          </div>
+                          <button
+                            onClick={() => removeFromWatchlist(result.id)}
+                            className="bg-red-800 hover:bg-red-700 px-3 py-1 rounded text-sm flex items-center gap-1"
+                          >
+                            🗑️ Remove
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
