@@ -2,10 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const basicAuth = require('express-basic-auth');
+const path = require('path');
 const db = require('./database');
 
 const app = express();
-const PORT = 3002;
+const PORT = process.env.PORT || 3002;
 
 // Middleware
 app.use(cors({
@@ -86,6 +87,9 @@ const deserializeShow = (row) => ({
   expandedSeasons: JSON.parse(row.expandedSeasons || '[]'),
   nextEpisode: JSON.parse(row.nextEpisode || 'null')
 });
+
+// Serve static files from the dist directory (built frontend)
+app.use(express.static(path.join(__dirname, '../dist')));
 
 // API Routes
 
@@ -174,6 +178,11 @@ app.delete('/api/watchlist/:id', (req, res) => {
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'TV Tracker API is running' });
+});
+
+// Catch-all handler: send back React's index.html file for client-side routing
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
 // Start server
