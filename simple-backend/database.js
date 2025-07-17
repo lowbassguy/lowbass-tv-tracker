@@ -1,8 +1,10 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-// Database file path - will be created in the simple-backend directory
-const dbPath = path.join(__dirname, 'tv-tracker.db');
+// Database file path - use persistent disk mount path on Render
+const dbPath = process.env.NODE_ENV === 'production' 
+  ? '/app/simple-backend/tv-tracker.db'
+  : path.join(__dirname, 'tv-tracker.db');
 
 // Create and connect to database
 const db = new sqlite3.Database(dbPath, (err) => {
