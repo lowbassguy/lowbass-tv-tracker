@@ -78,9 +78,18 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('unwatched'); // Current view tab
   const [loading, setLoading] = useState(false); // Loading state for API calls
   const [error, setError] = useState<string | null>(null); // Error handling state
-  const [expandedShows, setExpandedShows] = useState<Set<string>>(new Set()); // Track which shows are expanded
-  const [latestEpisodesSortOrder, setLatestEpisodesSortOrder] = useState<'newest' | 'oldest'>('newest'); // Sort order for latest episodes
-  const [upcomingEpisodesSortOrder, setUpcomingEpisodesSortOrder] = useState<'soonest' | 'latest'>('soonest'); // Sort order for upcoming episodes
+  const [expandedShows, setExpandedShows] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('expandedShows');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  }); // Track which shows are expanded
+  const [latestEpisodesSortOrder, setLatestEpisodesSortOrder] = useState<'newest' | 'oldest'>(() => {
+    const saved = localStorage.getItem('latestEpisodesSortOrder');
+    return (saved as 'newest' | 'oldest') || 'newest';
+  }); // Sort order for latest episodes
+  const [upcomingEpisodesSortOrder, setUpcomingEpisodesSortOrder] = useState<'soonest' | 'latest'>(() => {
+    const saved = localStorage.getItem('upcomingEpisodesSortOrder');
+    return (saved as 'soonest' | 'latest') || 'soonest';
+  }); // Sort order for upcoming episodes
 
   // 💾 Load watchlist from database on component mount
   useEffect(() => {
@@ -103,6 +112,19 @@ const App = () => {
       console.log('🧹 Component cleanup initiated');
     };
   }, []);
+
+  // 💾 Save UI settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('expandedShows', JSON.stringify(Array.from(expandedShows)));
+  }, [expandedShows]);
+
+  useEffect(() => {
+    localStorage.setItem('latestEpisodesSortOrder', latestEpisodesSortOrder);
+  }, [latestEpisodesSortOrder]);
+
+  useEffect(() => {
+    localStorage.setItem('upcomingEpisodesSortOrder', upcomingEpisodesSortOrder);
+  }, [upcomingEpisodesSortOrder]);
 
   // 📅 Daily update system - refresh episode data
   useEffect(() => {
