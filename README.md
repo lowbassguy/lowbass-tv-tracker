@@ -1,4 +1,4 @@
-# TV Tracker – Beginner-Friendly Setup Guide
+# lowbass' TV Tracker – Beginner-Friendly Setup Guide
 
 This page explains **in plain language** how to get the TV Tracker running on a normal Windows or Mac computer. No previous programming or GitHub experience is required.
 
@@ -95,5 +95,94 @@ If you plan to put this on the internet (for example with Railway or Render), yo
   Another program is using port 3002 or 5173. Close that program or restart your computer and try again.
 
 If you get stuck, email or message the person who sent you this project – they will be happy to help.
+
+---
+
+## 🌐 Host it Online (Optional)
+
+Want to access your TV Tracker from anywhere? Deploy it to the cloud:
+
+### 🚂 Railway (Recommended - Free)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template/tvmaze-tracker)
+
+1. Click the button above
+2. Connect your GitHub account and fork this repository
+3. **Optional**: Add environment variables for security:
+   - `AUTH_USERNAME` = your username
+   - `AUTH_PASSWORD` = your password
+4. Deploy! Your app will be live in ~3 minutes
+
+**Free tier**: 500 hours/month + $5 credit (plenty for personal use)
+
+### 🎨 Render (Also Free)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
+1. Click the button above
+2. Connect GitHub and select this repository
+3. **Important**: Make sure to add a "Disk" in the Render dashboard:
+   - Name: `tv-tracker-data`
+   - Mount Path: `/var/data`
+   - Size: 1GB (free)
+4. **Optional**: Add environment variables:
+   - `AUTH_USERNAME` = your username
+   - `AUTH_PASSWORD` = your password
+   - `DB_PATH` = `/var/data/tv-tracker.db`
+
+**Free tier**: Available with some limitations
+
+### ☁️ Heroku (Paid but Reliable)
+[![Deploy to Heroku](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy)
+
+1. Click the button above
+2. Create/login to Heroku account
+3. Set environment variables (recommended):
+   - `AUTH_USERNAME` = your username
+   - `AUTH_PASSWORD` = your password
+4. Deploy!
+
+**Cost**: ~$7/month minimum
+
+### 🐳 Docker (Any Platform)
+
+If your hosting service supports Docker:
+
+```bash
+# Clone and build
+git clone https://github.com/lowbass/lowbass-tv-tracker.git
+cd lowbass-tv-tracker
+docker build -t tv-tracker .
+
+# Run with authentication
+docker run -p 3002:3002 \
+  -e AUTH_USERNAME=yourusername \
+  -e AUTH_PASSWORD=yourpassword \
+  -v tv-tracker-data:/app/simple-backend \
+  tv-tracker
+```
+
+**Works on**: Digital Ocean, AWS, Google Cloud, Fly.io, etc.
+
+### 🔒 Security Notes
+
+- **Always set AUTH_USERNAME and AUTH_PASSWORD** when hosting online
+- Use strong passwords (12+ characters, mixed case, numbers, symbols)
+- Your data is stored in a private database - only you can access it
+
+### 🛠️ Troubleshooting
+
+**App won't start?**
+- Check the build logs in your hosting platform's dashboard
+- Make sure environment variables are set correctly
+
+**Can't save shows?**
+- For Render: Make sure you added the persistent disk
+- For others: Check that the database file can be written to
+
+**Forgot your password?**
+- Delete the AUTH_USERNAME and AUTH_PASSWORD environment variables
+- Redeploy the app
+- Access it without authentication, then re-add security
+
+**That's it!** Your TV Tracker will be accessible from any device with internet.
 
 > Enjoy keeping track of your favourite shows!
