@@ -193,10 +193,12 @@ const App = () => {
       console.log('✅ Daily update completed!');
     };
     
-    // Run on component mount - TEMPORARILY DISABLED FOR TESTING
-    // updateShowsDaily();
+    // Run on component mount
+    updateShowsDaily();
     
     // Set up daily update at midnight
+    let timeoutId: NodeJS.Timeout;
+    
     const scheduleNextUpdate = () => {
       const now = new Date();
       const tomorrow = new Date(now);
@@ -206,13 +208,13 @@ const App = () => {
       const msUntilMidnight = tomorrow.getTime() - now.getTime();
       console.log('⏰ Next update scheduled in', Math.floor(msUntilMidnight / 1000 / 60 / 60), 'hours');
       
-      return setTimeout(() => {
+      timeoutId = setTimeout(() => {
         updateShowsDaily();
         scheduleNextUpdate(); // Schedule the next update
       }, msUntilMidnight);
     };
     
-    const timeoutId = scheduleNextUpdate();
+    scheduleNextUpdate();
     
     return () => {
       clearTimeout(timeoutId);
