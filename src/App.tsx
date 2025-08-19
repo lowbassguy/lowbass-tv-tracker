@@ -197,7 +197,7 @@ const App = () => {
     updateShowsDaily();
     
     // Set up daily update at midnight
-    let timeoutId: NodeJS.Timeout;
+    let timeoutId: number;
     
     const scheduleNextUpdate = () => {
       const now = new Date();
