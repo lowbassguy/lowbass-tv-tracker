@@ -181,3 +181,7 @@ storybook-static
 *.sqlite3-journal
 *.sqlite3-wal
 *.sqlite3-shm
+
+# Developer Files And Folders
+
+/Dev Files/
