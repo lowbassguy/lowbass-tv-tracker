@@ -2,11 +2,16 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const basicAuth = require('express-basic-auth');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
+const databasePath = process.env.DB_PATH || path.join(__dirname, 'tv-tracker.db');
+const isAuthConfigured = Boolean(process.env.AUTH_USERNAME && process.env.AUTH_PASSWORD);
+const isDbBackupEnabled = process.env.ENABLE_DB_BACKUP_DOWNLOAD === 'true';
 
 // Middleware
 app.use(cors({
@@ -16,7 +21,7 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 
 // Basic Authentication - only if credentials are provided
-if (process.env.AUTH_USERNAME && process.env.AUTH_PASSWORD) {
+if (isAuthConfigured) {
   console.log('🔒 Basic authentication enabled');
   app.use(basicAuth({
     users: { [process.env.AUTH_USERNAME]: process.env.AUTH_PASSWORD },
@@ -29,6 +34,48 @@ if (process.env.AUTH_USERNAME && process.env.AUTH_PASSWORD) {
 }
 
 // Utility function to serialize show data for database
+const execSql = (sql) => new Promise((resolve, reject) => {
+  db.exec(sql, (err) => {
+    if (err) {
+      reject(err);
+      return;
+    }
+
+    resolve();
+  });
+});
+
+const deleteFileIfExists = async (filePath) => {
+  try {
+    await fs.promises.unlink(filePath);
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.error('Failed to clean up backup file:', err.message);
+    }
+  }
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const escapeSqliteString = (value) => `'${String(value).replace(/'/g, "''")}'`;
+
+const createDatabaseSnapshot = async (snapshotPath) => {
+  const vacuumIntoSql = `VACUUM INTO ${escapeSqliteString(snapshotPath)}`;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await execSql(vacuumIntoSql);
+      return;
+    } catch (err) {
+      if (err.code !== 'SQLITE_BUSY' || attempt === 3) {
+        throw err;
+      }
+
+      await sleep(attempt * 500);
+    }
+  }
+};
+
 const serializeShow = (show) => ({
   id: show.id,
   title: show.title,
@@ -179,6 +226,41 @@ app.delete('/api/watchlist/:id', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'TV Tracker API is running' });
 });
+
+if (isDbBackupEnabled && isAuthConfigured) {
+  // Create a consistent SQLite snapshot, then stream it as a download.
+  app.get('/api/admin/db-backup', async (req, res) => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupFileName = `tv-tracker-backup-${timestamp}.db`;
+    const snapshotPath = path.join(os.tmpdir(), backupFileName);
+
+    try {
+      console.log('Creating database snapshot for download...');
+      await deleteFileIfExists(snapshotPath);
+      await createDatabaseSnapshot(snapshotPath);
+
+      res.download(snapshotPath, backupFileName, async (err) => {
+        await deleteFileIfExists(snapshotPath);
+
+        if (err) {
+          console.error('Failed to send database backup:', err.message);
+
+          if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to send database backup' });
+          }
+        } else {
+          console.log('Database backup downloaded successfully');
+        }
+      });
+    } catch (err) {
+      await deleteFileIfExists(snapshotPath);
+      console.error('Failed to create database backup:', err.message);
+      res.status(500).json({ error: 'Failed to create database backup' });
+    }
+  });
+} else if (isDbBackupEnabled) {
+  console.log('DB backup download route not enabled because authentication is not configured');
+}
 
 // Catch-all handler: send back React's index.html file for client-side routing
 app.get('*', (req, res) => {
