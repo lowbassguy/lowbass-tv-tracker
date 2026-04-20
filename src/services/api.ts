@@ -30,6 +30,12 @@ interface Show {
   nextEpisode: any;
 }
 
+interface HealthStatus {
+  status: string;
+  message: string;
+  dbBackupEnabled?: boolean;
+}
+
 class ApiClient {
   private async request(endpoint: string, options: RequestInit = {}) {
     const url = `${API_BASE_URL}${endpoint}`;
@@ -61,6 +67,22 @@ class ApiClient {
       console.error('❌ Error loading watchlist:', error);
       throw error;
     }
+  }
+
+  async getHealthStatus(): Promise<HealthStatus> {
+    console.log('Checking API health status...');
+    try {
+      const health = await this.request('/health');
+      console.log('API health status loaded');
+      return health;
+    } catch (error) {
+      console.error('Error loading API health status:', error);
+      throw error;
+    }
+  }
+
+  getDatabaseBackupUrl(): string {
+    return `${API_BASE_URL}/admin/db-backup`;
   }
 
   // Save a show to database

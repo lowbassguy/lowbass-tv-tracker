@@ -90,6 +90,7 @@ const App = () => {
     const saved = localStorage.getItem('upcomingEpisodesSortOrder');
     return (saved as 'soonest' | 'latest') || 'soonest';
   }); // Sort order for upcoming episodes
+  const [dbBackupEnabled, setDbBackupEnabled] = useState(false);
 
   // 💾 Load watchlist from database on component mount
   useEffect(() => {
@@ -117,6 +118,19 @@ const App = () => {
   useEffect(() => {
     localStorage.setItem('expandedShows', JSON.stringify(Array.from(expandedShows)));
   }, [expandedShows]);
+
+  useEffect(() => {
+    const loadHealthStatus = async () => {
+      try {
+        const healthStatus = await apiClient.getHealthStatus();
+        setDbBackupEnabled(Boolean(healthStatus.dbBackupEnabled));
+      } catch (err) {
+        console.warn('Failed to load API health status:', err);
+      }
+    };
+
+    loadHealthStatus();
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('latestEpisodesSortOrder', latestEpisodesSortOrder);
@@ -325,6 +339,10 @@ const App = () => {
   };
 
   // 📅 Fetch next episode information for search results
+  const handleDatabaseDownload = () => {
+    window.location.href = apiClient.getDatabaseBackupUrl();
+  };
+
   const fetchNextEpisodeInfo = async (shows: Show[]) => {
     console.log('📅 Fetching next episode info for', shows.length, 'shows');
     
@@ -908,10 +926,20 @@ const App = () => {
       {/* 🔍 Search Section */}
       <div className="max-w-6xl mx-auto p-4">
         <div className="bg-gray-900 rounded-lg p-4 mb-6">
-          <h2 className="text-xl font-semibold mb-3 flex items-center gap-2">
-            <Search className="w-5 h-5" />
-            Search for TV Shows
-          </h2>
+          <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              <Search className="w-5 h-5" />
+              Search for TV Shows
+            </h2>
+            {dbBackupEnabled && (
+              <button
+                onClick={handleDatabaseDownload}
+                className="bg-red-800 hover:bg-red-700 px-4 py-2 rounded font-semibold transition-colors"
+              >
+                Download Database
+              </button>
+            )}
+          </div>
           
           <div className="flex gap-2">
             <input

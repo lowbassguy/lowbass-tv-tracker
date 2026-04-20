@@ -224,7 +224,11 @@ app.delete('/api/watchlist/:id', (req, res) => {
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'TV Tracker API is running' });
+  res.json({
+    status: 'OK',
+    message: 'TV Tracker API is running',
+    dbBackupEnabled: isDbBackupEnabled && isAuthConfigured
+  });
 });
 
 if (isDbBackupEnabled && isAuthConfigured) {
