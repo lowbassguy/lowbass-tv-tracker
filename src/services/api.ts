@@ -1,5 +1,6 @@
 // Simple API client for TV Tracker
-const API_BASE_URL = window.location.hostname === 'localhost' ? 'http://localhost:3002/api' : '/api';
+const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
+const API_BASE_URL = isLocalHost ? `http://${window.location.hostname}:3002/api` : '/api';
 
 interface Show {
   id: string;

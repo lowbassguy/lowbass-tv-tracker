@@ -3,7 +3,7 @@
  * Author: Joshua 'lowbass' Sommerfeldt
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, Tv, Calendar, Check, X, Play, Clock, Star, Info, ChevronDown, ChevronUp, CheckCircle, Circle } from 'lucide-react';
 import { apiClient } from './services/api';
 
@@ -92,6 +92,12 @@ const App = () => {
   }); // Sort order for upcoming episodes
   const [dbBackupEnabled, setDbBackupEnabled] = useState(false);
 
+  // Monotonic token so late-arriving search continuations can detect they're stale.
+  const searchTokenRef = useRef(0);
+  // Always-fresh handle on the watchlist so the daily-update timer doesn't
+  // execute against a stale snapshot captured at mount.
+  const watchlistRef = useRef<Show[]>([]);
+
   // 💾 Load watchlist from database on component mount
   useEffect(() => {
     const loadWatchlist = async () => {
@@ -140,33 +146,44 @@ const App = () => {
     localStorage.setItem('upcomingEpisodesSortOrder', upcomingEpisodesSortOrder);
   }, [upcomingEpisodesSortOrder]);
 
+  // Keep the watchlist ref in sync on every render so the daily-update closure
+  // (C1/M1/M6) always sees the latest data without re-arming the timer.
+  useEffect(() => {
+    watchlistRef.current = watchlist;
+  });
+
   // 📅 Daily update system - refresh episode data
   useEffect(() => {
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
     const updateShowsDaily = async () => {
       console.log('📅 Running daily update check...');
-      
-      if (watchlist.length === 0) return;
-      
+
+      const currentWatchlist = watchlistRef.current;
+      if (currentWatchlist.length === 0) return;
+
       const now = new Date();
       const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      
+
       // Find shows that need updating (not updated in last 24 hours)
-      const showsToUpdate = watchlist.filter(show => {
+      const showsToUpdate = currentWatchlist.filter(show => {
         if (!show.lastUpdated) return true;
         const lastUpdated = new Date(show.lastUpdated);
         return lastUpdated < oneDayAgo;
       });
-      
+
       console.log('🔄 Found', showsToUpdate.length, 'shows needing updates');
-      
+
       if (showsToUpdate.length === 0) return;
-      
+
       // Update shows in batches to avoid overwhelming the API
       const batchSize = 3;
       for (let i = 0; i < showsToUpdate.length; i += batchSize) {
+        if (cancelled) return;
         const batch = showsToUpdate.slice(i, i + batchSize);
         console.log('📡 Updating batch', Math.floor(i / batchSize) + 1, '/', Math.ceil(showsToUpdate.length / batchSize));
-        
+
         const updates = await Promise.all(
           batch.map(async (show) => {
             try {
@@ -179,70 +196,92 @@ const App = () => {
             }
           })
         );
-        
-        // Update the watchlist with the updated shows
-        setWatchlist(prevWatchlist => 
+
+        if (cancelled) return;
+
+        // Merge into the latest state and persist what actually landed —
+        // avoids overwriting concurrent user toggles (M6).
+        const persistTargets: Show[] = [];
+        setWatchlist(prevWatchlist =>
           prevWatchlist.map(show => {
             const updatedShow = updates.find(u => u.id === show.id);
-            return updatedShow || show;
+            if (!updatedShow) return show;
+            // Preserve any watched changes the user made during the network call
+            // by re-merging existing episode flags onto the fresh data.
+            const merged: Show = {
+              ...updatedShow,
+              episodes: updatedShow.episodes.map(ep => {
+                const userEp = show.episodes.find(e => e.id === ep.id);
+                if (!userEp) return ep;
+                return { ...ep, watched: userEp.watched, watchedDate: userEp.watchedDate };
+              })
+            };
+            const watchedCount = merged.episodes.filter(e => e.watched).length;
+            merged.watchedEpisodesCount = watchedCount;
+            merged.watched = watchedCount === merged.episodes.length && merged.episodes.length > 0;
+            merged.seasons = organizeEpisodesIntoSeasons(merged.episodes);
+            persistTargets.push(merged);
+            return merged;
           })
         );
-        
+
         // Save updated shows to database
         try {
           await Promise.all(
-            updates.map(updatedShow => apiClient.updateShow(updatedShow))
+            persistTargets.map(updatedShow => apiClient.updateShow(updatedShow))
           );
           console.log('✅ Daily updates saved to database');
         } catch (err) {
           console.error('❌ Error saving daily updates to database:', err);
         }
-        
+
         // Add delay between batches to be respectful to the API
         if (i + batchSize < showsToUpdate.length) {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
-      
+
       console.log('✅ Daily update completed!');
     };
-    
+
     // Run on component mount
     updateShowsDaily();
-    
+
     // Set up daily update at midnight
-    let timeoutId: number;
-    
     const scheduleNextUpdate = () => {
+      if (cancelled) return;
       const now = new Date();
       const tomorrow = new Date(now);
       tomorrow.setDate(tomorrow.getDate() + 1);
       tomorrow.setHours(0, 0, 0, 0); // Set to midnight
-      
+
       const msUntilMidnight = tomorrow.getTime() - now.getTime();
       console.log('⏰ Next update scheduled in', Math.floor(msUntilMidnight / 1000 / 60 / 60), 'hours');
-      
+
       timeoutId = setTimeout(() => {
+        if (cancelled) return;
         updateShowsDaily();
         scheduleNextUpdate(); // Schedule the next update
       }, msUntilMidnight);
     };
-    
+
     scheduleNextUpdate();
-    
+
     return () => {
-      clearTimeout(timeoutId);
+      cancelled = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-  }, [watchlist.length]); // Only depend on watchlist length to avoid infinite loops
+  }, []); // Stable schedule — fresh data comes from watchlistRef.
 
   // Note: Watchlist is now saved to database immediately when changed (no auto-save useEffect needed)
 
   // 🔍 Search for shows using TVmaze API
   const handleSearch = async () => {
     console.log('🔍 Starting search for:', searchQuery);
+    const searchToken = ++searchTokenRef.current;
     setLoading(true);
     setError(null);
-    
+
     try {
       // 📡 Search TVmaze API for shows - using HTTPS to avoid CORS issues
       console.log('📡 Fetching data from TVmaze API...');
@@ -313,13 +352,17 @@ const App = () => {
         };
       });
       
+      if (searchToken !== searchTokenRef.current) {
+        console.log('🚫 Discarding stale search results for token', searchToken);
+        return;
+      }
       setSearchResults(transformedResults);
       console.log('✅ Search completed! Found', transformedResults.length, 'results');
-      
+
       // 🎯 If we have results, fetch next episode info for each show
       if (transformedResults.length > 0) {
         console.log('🔍 Fetching next episode info for results...');
-        fetchNextEpisodeInfo(transformedResults);
+        fetchNextEpisodeInfo(transformedResults, searchToken);
       }
       
     } catch (err) {
@@ -343,21 +386,24 @@ const App = () => {
     window.location.href = apiClient.getDatabaseBackupUrl();
   };
 
-  const fetchNextEpisodeInfo = async (shows: Show[]) => {
+  const fetchNextEpisodeInfo = async (shows: Show[], searchToken?: number) => {
     console.log('📅 Fetching next episode info for', shows.length, 'shows');
-    
+
     try {
       const updatedShows = await Promise.all(
         shows.map(async (show) => {
           try {
             // 📡 Get show details with episode information
             const response = await fetch(`https://api.tvmaze.com/shows/${show.tvmazeId}?embed=nextepisode`);
+            if (!response.ok) {
+              throw new Error(`TVmaze ${response.status} for show ${show.tvmazeId}`);
+            }
             const data = await response.json();
-            
+
             if (data._embedded?.nextepisode) {
               const nextEp = data._embedded.nextepisode;
               console.log('📺 Found next episode for', show.title, ':', nextEp.name);
-              
+
               return {
                 ...show,
                 nextEpisode: {
@@ -370,7 +416,7 @@ const App = () => {
                 }
               };
             }
-            
+
             return show;
           } catch (err) {
             console.warn('⚠️ Failed to fetch episode info for', show.title, err);
@@ -378,7 +424,11 @@ const App = () => {
           }
         })
       );
-      
+
+      if (searchToken !== undefined && searchToken !== searchTokenRef.current) {
+        console.log('🚫 Discarding stale episode info for token', searchToken);
+        return;
+      }
       setSearchResults(updatedShows);
       console.log('✅ Episode info updated!');
     } catch (err) {
@@ -387,15 +437,24 @@ const App = () => {
   };
 
   // 📺 Fetch comprehensive episode list for a show
-  const fetchEpisodeList = async (tvmazeId: number): Promise<Episode[]> => {
+  // Returns null when the fetch failed (so callers can preserve existing data
+  // instead of mistaking the failure for an empty episode list).
+  const fetchEpisodeList = async (tvmazeId: number): Promise<Episode[] | null> => {
     console.log('📺 Fetching episode list for show ID:', tvmazeId);
-    
+
     try {
       const response = await fetch(`https://api.tvmaze.com/shows/${tvmazeId}/episodes`);
+      if (!response.ok) {
+        throw new Error(`TVmaze ${response.status} for episodes of show ${tvmazeId}`);
+      }
       const episodes = await response.json();
-      
+
+      if (!Array.isArray(episodes)) {
+        throw new Error('TVmaze returned non-array episode payload');
+      }
+
       console.log('📦 Fetched', episodes.length, 'episodes');
-      
+
       return episodes.map((ep: any) => ({
         id: ep.id,
         season: ep.season,
@@ -410,8 +469,20 @@ const App = () => {
       }));
     } catch (err) {
       console.error('❌ Error fetching episode list:', err);
-      return [];
+      return null;
     }
+  };
+
+  // Treat an episode as "aired" only when its air date is strictly before the
+  // current local date. TVmaze returns airdate as YYYY-MM-DD, which the Date
+  // constructor parses as UTC midnight — so a naive `<= new Date()` flickers
+  // around the date boundary depending on the viewer's timezone.
+  const hasEpisodeAired = (ep: Pick<Episode, 'airDate'>, reference: Date = new Date()): boolean => {
+    if (!ep.airDate) return false;
+    const airLocalMidnight = new Date(`${ep.airDate}T00:00:00`);
+    if (Number.isNaN(airLocalMidnight.getTime())) return false;
+    const refMidnight = new Date(reference.getFullYear(), reference.getMonth(), reference.getDate());
+    return airLocalMidnight.getTime() <= refMidnight.getTime();
   };
 
   // 🗂️ Organize episodes into seasons
@@ -444,25 +515,36 @@ const App = () => {
   // 🔄 Update show with comprehensive episode data
   const updateShowWithEpisodes = async (show: Show): Promise<Show> => {
     console.log('🔄 Updating show with episode data:', show.title);
-    
+
     const freshEpisodes = await fetchEpisodeList(show.tvmazeId);
-    
-    // Preserve user's watch status by merging with existing episode data
+
+    // If the fetch failed, leave the show untouched rather than clobbering
+    // existing episode data with an empty list.
+    if (freshEpisodes === null) {
+      console.warn('⚠️ Skipping episode merge for', show.title, '— TVmaze fetch failed');
+      return show;
+    }
+
+    // Preserve user's watch status. Fall back to (season, episode) when the
+    // TVmaze episode id has drifted so watched history isn't lost on renumber.
     const episodes = freshEpisodes.map(freshEp => {
-      const existingEp = show.episodes.find(ep => ep.id === freshEp.id);
+      const existingEp =
+        show.episodes.find(ep => ep.id === freshEp.id) ??
+        show.episodes.find(ep => ep.season === freshEp.season && ep.episode === freshEp.episode);
       return {
         ...freshEp,
         watched: existingEp?.watched || false,
         watchedDate: existingEp?.watchedDate || undefined
       };
     });
-    
+
     const seasons = organizeEpisodesIntoSeasons(episodes);
-    
-    // Find next unwatched episode
+
+    // Find next unwatched episode (counted as aired only once the air date is
+    // strictly before today in the user's local timezone).
     let nextEpisode: NextEpisode | null = null;
-    const nextUnwatched = episodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
-    
+    const nextUnwatched = episodes.find(ep => !ep.watched && hasEpisodeAired(ep));
+
     if (nextUnwatched) {
       nextEpisode = {
         season: nextUnwatched.season,
@@ -474,9 +556,9 @@ const App = () => {
         hasNext: true
       };
     }
-    
+
     const watchedCount = episodes.filter(ep => ep.watched).length;
-    
+
     return {
       ...show,
       episodes,
@@ -513,34 +595,31 @@ const App = () => {
     };
     
     // Add to watchlist immediately for better UX
-    setWatchlist([...watchlist, newItem]);
+    setWatchlist(prev => [...prev, newItem]);
     setSearchResults([]); // Clear search results
     setSearchQuery(''); // Clear search input
     console.log('✅ Successfully added to watchlist!');
-    
-    // Save to database
-    try {
-      await apiClient.saveShow(newItem);
-      console.log('✅ Show saved to database');
-    } catch (err) {
-      console.error('❌ Error saving show to database:', err);
-    }
-    
-    // Fetch episode data in background
+
+    // Fetch episode data, then persist once with the complete record.
+    let toPersist: Show = newItem;
     try {
       console.log('📺 Fetching episode data for', item.title);
       const updatedItem = await updateShowWithEpisodes(newItem);
-      
-      // Update the watchlist with episode data
-      setWatchlist(prevWatchlist => 
+      toPersist = updatedItem;
+      setWatchlist(prevWatchlist =>
         prevWatchlist.map(w => w.id === item.id ? updatedItem : w)
       );
-      
-      // Save updated show to database
-      await apiClient.updateShow(updatedItem);
-      console.log('✅ Episode data loaded and saved to database for', item.title);
     } catch (err) {
       console.error('❌ Error loading episode data:', err);
+    }
+
+    try {
+      await apiClient.saveShow(toPersist);
+      console.log('✅ Show saved to database');
+    } catch (err) {
+      console.error('❌ Error saving show to database:', err);
+      setError(`Failed to save "${item.title}" to the server. Reverting.`);
+      setWatchlist(prev => prev.filter(w => w.id !== item.id));
     }
   };
 
@@ -560,25 +639,24 @@ const App = () => {
     // Create updated episodes - only mark aired episodes when marking as watched
     const updatedEpisodes = currentShow.episodes.map(episode => {
       // Only mark as watched if the episode has aired (or if we're unmarking)
-      const hasAired = new Date(episode.airDate) <= now;
-      const shouldMarkWatched = watched ? hasAired : false;
-      
+      const shouldMarkWatched = watched ? hasEpisodeAired(episode, now) : false;
+
       return {
         ...episode,
         watched: shouldMarkWatched,
         watchedDate: shouldMarkWatched ? new Date().toISOString() : undefined
       };
     });
-    
+
     // Recalculate seasons with updated watched counts
     const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
-    
+
     // Calculate overall stats
     const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
     const totalEpisodes = updatedEpisodes.length;
-    
+
     // Find next unwatched episode
-    const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= now);
+    const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && hasEpisodeAired(ep, now));
     const nextEpisode = nextUnwatched ? {
       season: nextUnwatched.season,
       episode: nextUnwatched.episode,
@@ -588,7 +666,7 @@ const App = () => {
       runtime: nextUnwatched.runtime,
       hasNext: true
     } : null;
-    
+
     // Create the updated show object
     const updatedShow: Show = {
       ...currentShow,
@@ -600,14 +678,14 @@ const App = () => {
       lastUpdated: new Date().toISOString(),
       watchedDate: watched ? new Date().toISOString() : undefined
     };
-    
+
     // Update the state
-    setWatchlist(prevWatchlist => 
-      prevWatchlist.map(show => 
+    setWatchlist(prevWatchlist =>
+      prevWatchlist.map(show =>
         show.id === showId ? updatedShow : show
       )
     );
-    
+
     // Save to database
     try {
       console.log('🔄 Saving series watch status to database...');
@@ -615,6 +693,7 @@ const App = () => {
       console.log('✅ Show watch status updated in database');
     } catch (err) {
       console.error('❌ Error updating show in database:', err);
+      setError(`Failed to update "${currentShow.title}" on the server.`);
     }
   };
 
@@ -633,16 +712,22 @@ const App = () => {
   // 🗑️ Remove from watchlist
   const removeFromWatchlist = async (itemId: string) => {
     console.log('🗑️ Removing from watchlist:', itemId);
-    
-    // Remove from state immediately for better UX
-    setWatchlist(watchlist.filter(item => item.id !== itemId));
-    
-    // Remove from database
+
+    // Snapshot the removed item so we can restore it if the DB call fails.
+    const removed = watchlist.find(item => item.id === itemId);
+    setWatchlist(prev => prev.filter(item => item.id !== itemId));
+
     try {
       await apiClient.removeShow(itemId);
       console.log('✅ Item removed from database successfully!');
     } catch (err) {
       console.error('❌ Error removing item from database:', err);
+      if (removed) {
+        setError(`Failed to remove "${removed.title}" on the server. Restored.`);
+        setWatchlist(prev => prev.some(w => w.id === itemId) ? prev : [...prev, removed]);
+      } else {
+        setError('Failed to remove show on the server.');
+      }
     }
   };
 
@@ -666,16 +751,17 @@ const App = () => {
     
     const allUnwatchedEpisodes: (Episode & { showTitle: string; showId: string })[] = [];
     
+    const now = new Date();
     watchlist.forEach(show => {
       if (!show.watched && show.episodes) {
         const unwatchedEpisodes = show.episodes
-          .filter(ep => !ep.watched && new Date(ep.airDate) <= new Date())
+          .filter(ep => !ep.watched && hasEpisodeAired(ep, now))
           .map(ep => ({
             ...ep,
             showTitle: show.title,
             showId: show.id
           }));
-        
+
         allUnwatchedEpisodes.push(...unwatchedEpisodes);
       }
     });
@@ -698,17 +784,17 @@ const App = () => {
     
     const allUpcomingEpisodes: (Episode & { showTitle: string; showId: string })[] = [];
     const now = new Date();
-    
+
     watchlist.forEach(show => {
       if (!show.watched && show.episodes) {
         const upcomingEpisodes = show.episodes
-          .filter(ep => !ep.watched && new Date(ep.airDate) > now)
+          .filter(ep => !ep.watched && !hasEpisodeAired(ep, now))
           .map(ep => ({
             ...ep,
             showTitle: show.title,
             showId: show.id
           }));
-        
+
         allUpcomingEpisodes.push(...upcomingEpisodes);
       }
     });
@@ -793,7 +879,7 @@ const App = () => {
     const totalEpisodes = updatedEpisodes.length;
     
     // Find next unwatched episode
-    const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= new Date());
+    const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && hasEpisodeAired(ep));
     const nextEpisode = nextUnwatched ? {
       season: nextUnwatched.season,
       episode: nextUnwatched.episode,
@@ -803,7 +889,7 @@ const App = () => {
       runtime: nextUnwatched.runtime,
       hasNext: true
     } : null;
-    
+
     // Create the updated show object
     const updatedShow: Show = {
       ...currentShow,
@@ -814,14 +900,14 @@ const App = () => {
       nextEpisode,
       lastUpdated: new Date().toISOString()
     };
-    
+
     // Update the state
-    setWatchlist(prevWatchlist => 
-      prevWatchlist.map(show => 
+    setWatchlist(prevWatchlist =>
+      prevWatchlist.map(show =>
         show.id === showId ? updatedShow : show
       )
     );
-    
+
     // Save to database
     console.log('🔄 About to save to database, updatedShow exists:', !!updatedShow);
     try {
@@ -830,6 +916,7 @@ const App = () => {
       console.log('✅ Episode watch status updated in database');
     } catch (err) {
       console.error('❌ Error updating episode in database:', err);
+      setError(`Failed to update episode for "${currentShow.title}" on the server.`);
     }
   };
 
@@ -850,9 +937,8 @@ const App = () => {
     const updatedEpisodes = currentShow.episodes.map(episode => {
       if (episode.season === seasonNumber) {
         // Only mark as watched if the episode has aired (or if we're unmarking)
-        const hasAired = new Date(episode.airDate) <= now;
-        const shouldMarkWatched = watched ? hasAired : false;
-        
+        const shouldMarkWatched = watched ? hasEpisodeAired(episode, now) : false;
+
         return {
           ...episode,
           watched: shouldMarkWatched,
@@ -861,16 +947,16 @@ const App = () => {
       }
       return episode;
     });
-    
+
     // Recalculate seasons with updated watched counts
     const updatedSeasons = organizeEpisodesIntoSeasons(updatedEpisodes);
-    
+
     // Calculate overall stats
     const watchedCount = updatedEpisodes.filter(ep => ep.watched).length;
     const totalEpisodes = updatedEpisodes.length;
-    
+
     // Find next unwatched episode
-    const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && new Date(ep.airDate) <= now);
+    const nextUnwatched = updatedEpisodes.find(ep => !ep.watched && hasEpisodeAired(ep, now));
     const nextEpisode = nextUnwatched ? {
       season: nextUnwatched.season,
       episode: nextUnwatched.episode,
@@ -880,7 +966,7 @@ const App = () => {
       runtime: nextUnwatched.runtime,
       hasNext: true
     } : null;
-    
+
     // Create the updated show object
     const updatedShow: Show = {
       ...currentShow,
@@ -891,14 +977,14 @@ const App = () => {
       nextEpisode,
       lastUpdated: new Date().toISOString()
     };
-    
+
     // Update the state
-    setWatchlist(prevWatchlist => 
-      prevWatchlist.map(show => 
+    setWatchlist(prevWatchlist =>
+      prevWatchlist.map(show =>
         show.id === showId ? updatedShow : show
       )
     );
-    
+
     // Save to database
     try {
       console.log('🔄 Saving season watch status to database...');
@@ -906,6 +992,7 @@ const App = () => {
       console.log('✅ Season watch status updated in database');
     } catch (err) {
       console.error('❌ Error updating season in database:', err);
+      setError(`Failed to update season for "${currentShow.title}" on the server.`);
     }
   };
 

@@ -76,16 +76,21 @@ const createDatabaseSnapshot = async (snapshotPath) => {
   }
 };
 
+// Don't coerce missing scalars to the literal string "undefined" — leave them
+// as NULL so the DB stays accurate.
+const toNullableString = (value) =>
+  value === undefined || value === null ? null : String(value);
+
 const serializeShow = (show) => ({
   id: show.id,
   title: show.title,
   type: show.type,
-  year: String(show.year),
+  year: toNullableString(show.year),
   platform: show.platform,
   genres: JSON.stringify(show.genres || []),
   status: show.status,
   poster: show.poster,
-  rating: String(show.rating),
+  rating: toNullableString(show.rating),
   summary: show.summary,
   language: show.language,
   runtime: show.runtime,
@@ -104,6 +109,18 @@ const serializeShow = (show) => ({
   expandedSeasons: JSON.stringify(show.expandedSeasons || []),
   nextEpisode: JSON.stringify(show.nextEpisode || null)
 });
+
+// Minimal payload validation — rejects clearly malformed mutation bodies
+// before they hit SQLite. Returns an error string when invalid.
+const validateShowPayload = (show) => {
+  if (!show || typeof show !== 'object') return 'Request body must be a JSON object';
+  if (typeof show.id !== 'string' || show.id.length === 0) return 'Field "id" is required and must be a non-empty string';
+  if (typeof show.title !== 'string' || show.title.length === 0) return 'Field "title" is required and must be a non-empty string';
+  if (show.tvmazeId !== undefined && show.tvmazeId !== null && typeof show.tvmazeId !== 'number') {
+    return 'Field "tvmazeId" must be a number when provided';
+  }
+  return null;
+};
 
 // Utility function to deserialize show data from database
 const deserializeShow = (row) => ({
@@ -158,18 +175,24 @@ app.get('/api/watchlist', (req, res) => {
 
 // POST /api/watchlist - Add a show
 app.post('/api/watchlist', (req, res) => {
-  console.log('📤 POST /api/watchlist - Adding show:', req.body.title);
-  
+  const validationError = validateShowPayload(req.body);
+  if (validationError) {
+    console.warn('⚠️ POST /api/watchlist - invalid payload:', validationError);
+    return res.status(400).json({ error: validationError });
+  }
+
   const show = req.body;
+  console.log('📤 POST /api/watchlist - Adding show:', show.title);
+
   const serializedShow = serializeShow(show);
-  
+
   // Build the INSERT statement
   const columns = Object.keys(serializedShow).join(', ');
   const placeholders = Object.keys(serializedShow).map(() => '?').join(', ');
   const values = Object.values(serializedShow);
-  
+
   const sql = `INSERT OR REPLACE INTO shows (${columns}) VALUES (${placeholders})`;
-  
+
   db.run(sql, values, function(err) {
     if (err) {
       console.error('❌ Error adding show:', err.message);
@@ -183,21 +206,34 @@ app.post('/api/watchlist', (req, res) => {
 
 // PUT /api/watchlist/:id - Update a show
 app.put('/api/watchlist/:id', (req, res) => {
-  console.log('🔄 PUT /api/watchlist/:id - Updating show:', req.params.id);
-  
+  const validationError = validateShowPayload(req.body);
+  if (validationError) {
+    console.warn('⚠️ PUT /api/watchlist - invalid payload:', validationError);
+    return res.status(400).json({ error: validationError });
+  }
+  if (req.body.id !== req.params.id) {
+    console.warn('⚠️ PUT /api/watchlist - id mismatch between path and body');
+    return res.status(400).json({ error: 'Path id does not match body id' });
+  }
+
   const show = req.body;
+  console.log('🔄 PUT /api/watchlist/:id - Updating show:', req.params.id);
+
   const serializedShow = serializeShow(show);
-  
+
   // Build the UPDATE statement
   const updates = Object.keys(serializedShow).map(key => `${key} = ?`).join(', ');
   const values = [...Object.values(serializedShow), req.params.id];
-  
+
   const sql = `UPDATE shows SET ${updates} WHERE id = ?`;
-  
+
   db.run(sql, values, function(err) {
     if (err) {
       console.error('❌ Error updating show:', err.message);
       res.status(500).json({ error: 'Failed to update show' });
+    } else if (this.changes === 0) {
+      console.warn('⚠️ Update affected no rows for id', req.params.id);
+      res.status(404).json({ error: 'Show not found' });
     } else {
       console.log('✅ Show updated successfully');
       res.json({ success: true });
@@ -208,13 +244,16 @@ app.put('/api/watchlist/:id', (req, res) => {
 // DELETE /api/watchlist/:id - Remove a show
 app.delete('/api/watchlist/:id', (req, res) => {
   console.log('🗑️ DELETE /api/watchlist/:id - Removing show:', req.params.id);
-  
+
   const sql = 'DELETE FROM shows WHERE id = ?';
-  
+
   db.run(sql, [req.params.id], function(err) {
     if (err) {
       console.error('❌ Error removing show:', err.message);
       res.status(500).json({ error: 'Failed to remove show' });
+    } else if (this.changes === 0) {
+      console.warn('⚠️ Delete affected no rows for id', req.params.id);
+      res.status(404).json({ error: 'Show not found' });
     } else {
       console.log('✅ Show removed successfully');
       res.json({ success: true });
@@ -266,8 +305,12 @@ if (isDbBackupEnabled && isAuthConfigured) {
   console.log('DB backup download route not enabled because authentication is not configured');
 }
 
-// Catch-all handler: send back React's index.html file for client-side routing
+// Catch-all handler: send back React's index.html file for client-side routing.
+// Unknown /api/* paths should 404 instead of silently returning the SPA shell.
 app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API endpoint not found' });
+  }
   res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
@@ -277,9 +320,9 @@ app.listen(PORT, () => {
   console.log(`📊 Database location: ${__dirname}/tv-tracker.db`);
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('\n🔄 Shutting down gracefully...');
+// Graceful shutdown — handle both SIGINT (Ctrl-C) and SIGTERM (container stop).
+const shutdown = (signal) => {
+  console.log(`\n🔄 Received ${signal}, shutting down gracefully...`);
   db.close((err) => {
     if (err) {
       console.error('❌ Error closing database:', err.message);
@@ -288,4 +331,8 @@ process.on('SIGINT', () => {
     }
     process.exit(0);
   });
-}); 
+};
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
