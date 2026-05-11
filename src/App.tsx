@@ -3,9 +3,18 @@
  * Author: Joshua 'lowbass' Sommerfeldt
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, Tv, Calendar, Check, X, Play, Clock, Star, Info, ChevronDown, ChevronUp, CheckCircle, Circle } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 import { apiClient } from './services/api';
+import { AppHeader } from './components/AppHeader';
+import { SearchPanel } from './components/SearchPanel';
+import { StatsBar } from './components/StatsBar';
+import { EpisodeRail } from './components/EpisodeRail';
+import { WatchlistTabs } from './components/WatchlistTabs';
+import { WatchlistGrid } from './components/WatchlistGrid';
+import { ShowDrawer } from './components/ShowDrawer';
+import { EmptyState } from './components/EmptyState';
+import { AppFooter } from './components/AppFooter';
+import { TooltipProvider } from './components/ui/tooltip';
 
 // Define types for better TypeScript support
 interface Episode {
@@ -91,6 +100,10 @@ const App = () => {
     return (saved as 'soonest' | 'latest') || 'soonest';
   }); // Sort order for upcoming episodes
   const [dbBackupEnabled, setDbBackupEnabled] = useState(false);
+
+  // Modern shell state
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeShowId, setActiveShowId] = useState<string | null>(null);
 
   // Monotonic token so late-arriving search continuations can detect they're stale.
   const searchTokenRef = useRef(0);
@@ -996,533 +1009,97 @@ const App = () => {
     }
   };
 
-  // 🎨 Main render function
+  // 🎨 Main render function — modern shell, same data flow
+  const watchlistIds = new Set(watchlist.map(w => w.id));
+  const posterByShowId = new Map(watchlist.map(s => [s.id, s.poster]));
+  const filteredItems = getFilteredItems();
+  const activeShow = activeShowId ? watchlist.find(s => s.id === activeShowId) ?? null : null;
+
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* 🎬 Header */}
-      <header className="bg-gradient-to-r from-red-900 to-red-700 p-4 shadow-lg">
-        <div className="max-w-6xl mx-auto">
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Tv className="w-8 h-8" />
-            lowbass' TV Tracker
-          </h1>
-          <p className="text-sm mt-1 opacity-90">Track all your favorite TV shows! 📺</p>
-        </div>
-      </header>
+    <TooltipProvider delayDuration={150}>
+      <div className="min-h-screen pb-12">
+        <AppHeader
+          dbBackupEnabled={dbBackupEnabled}
+          searchOpen={searchOpen}
+          onDownload={handleDatabaseDownload}
+          onToggleSearch={() => setSearchOpen(o => !o)}
+        />
 
-      {/* 🔍 Search Section */}
-      <div className="max-w-6xl mx-auto p-4">
-        <div className="bg-gray-900 rounded-lg p-4 mb-6">
-          <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <h2 className="text-xl font-semibold flex items-center gap-2">
-              <Search className="w-5 h-5" />
-              Search for TV Shows
-            </h2>
-            {dbBackupEnabled && (
-              <button
-                onClick={handleDatabaseDownload}
-                className="bg-red-800 hover:bg-red-700 px-4 py-2 rounded font-semibold transition-colors"
-              >
-                Download Database
-              </button>
-            )}
-          </div>
-          
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => {
-                console.log('⌨️ Search input changed:', e.target.value);
-                setSearchQuery(e.target.value);
-              }}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  console.log('⏎ Enter key pressed, triggering search');
-                  handleSearch();
-                }
-              }}
-              placeholder="Enter TV show title..."
-              className="flex-1 bg-black border border-red-800 rounded px-3 py-2 focus:outline-none focus:border-red-600"
+        <SearchPanel
+          open={searchOpen}
+          query={searchQuery}
+          setQuery={setSearchQuery}
+          loading={loading}
+          error={error}
+          results={searchResults}
+          watchlistIds={watchlistIds}
+          onSearch={handleSearch}
+          onAdd={addToWatchlist}
+        />
+
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8">
+          {watchlist.length > 0 && <StatsBar watchlist={watchlist} />}
+
+          {watchlist.length > 0 && (
+            <EpisodeRail
+              title="Continue watching"
+              episodes={getLatestUnwatchedEpisodes()}
+              posterByShowId={posterByShowId}
+              sortOrder={latestEpisodesSortOrder}
+              sortLabels={['newest', 'oldest']}
+              setSortOrder={(v: 'newest' | 'oldest') => setLatestEpisodesSortOrder(v)}
+              onToggle={toggleEpisodeWatched}
+              onSelectShow={setActiveShowId}
             />
-            <button
-              onClick={handleSearch}
-              disabled={loading || !searchQuery.trim()}
-              className="bg-red-700 hover:bg-red-600 disabled:bg-gray-700 px-4 py-2 rounded font-semibold transition-colors"
-            >
-              {loading ? '🔄 Searching...' : '🔍 Search'}
-            </button>
-          </div>
-
-          {/* 🔍 Search Results */}
-          {searchResults.length > 0 && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {searchResults.map(result => {
-                const isInWatchlist = watchlist.find(w => w.id === result.id);
-                return (
-                  <div key={result.id} className="bg-black border border-red-900 rounded-lg p-3 flex gap-3">
-                    <img 
-                      src={result.poster} 
-                      alt={result.title}
-                      className="w-20 h-30 object-cover rounded"
-                      onError={(e) => {
-                        console.log('🖼️ Image failed to load for', result.title);
-                        (e.target as HTMLImageElement).src = `https://via.placeholder.com/150x225/8a0707/ffffff?text=${encodeURIComponent(result.title)}`;
-                      }}
-                    />
-                    <div className="flex-1">
-                      <h3 className="font-semibold flex items-center gap-2">
-                        <Tv className="w-4 h-4" />
-                        {result.title}
-                        {isInWatchlist && (
-                          <span className="bg-green-600 text-white text-xs px-2 py-1 rounded-full">
-                            ✓ In Watchlist
-                          </span>
-                        )}
-                      </h3>
-                      <p className="text-sm text-gray-400">
-                        {result.year} • {result.platform} • {result.status}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        {result.genres.slice(0, 3).join(', ')}
-                      </p>
-                      <p className="text-sm text-yellow-500 flex items-center gap-1 mt-1">
-                        <Star className="w-3 h-3" /> {result.rating}/10
-                      </p>
-                      {result.nextEpisode && result.nextEpisode.season && (
-                        <p className="text-xs text-green-400 mt-1">
-                          📺 Next: S{result.nextEpisode.season}E{result.nextEpisode.episode} - {result.nextEpisode.airDate}
-                        </p>
-                      )}
-                      {!isInWatchlist ? (
-                        <button
-                          onClick={() => addToWatchlist(result)}
-                          className="mt-2 bg-red-700 hover:bg-red-600 px-3 py-1 rounded text-sm"
-                        >
-                          ➕ Add to Watchlist
-                        </button>
-                      ) : (
-                        <div className="mt-2 flex gap-2">
-                          <div className="bg-gray-600 px-3 py-1 rounded text-sm text-gray-300">
-                            ✓ Already in Watchlist
-                          </div>
-                          <button
-                            onClick={() => removeFromWatchlist(result.id)}
-                            className="bg-red-800 hover:bg-red-700 px-3 py-1 rounded text-sm flex items-center gap-1"
-                          >
-                            🗑️ Remove
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           )}
 
-          {/* ❌ Error Display */}
-          {error && (
-            <div className="mt-3 text-red-500 text-sm">
-              ❌ {error}
-            </div>
+          {watchlist.length > 0 && (
+            <EpisodeRail
+              title="Upcoming episodes"
+              episodes={getUpcomingUnwatchedEpisodes()}
+              posterByShowId={posterByShowId}
+              sortOrder={upcomingEpisodesSortOrder}
+              sortLabels={['soonest', 'latest']}
+              setSortOrder={(v: 'soonest' | 'latest') => setUpcomingEpisodesSortOrder(v)}
+              onSelectShow={setActiveShowId}
+              readonly
+            />
           )}
-        </div>
 
-        {/* 📺 Latest Unwatched Episodes */}
-        {getLatestUnwatchedEpisodes().length > 0 && (
-          <div className="bg-gray-900 border border-red-900 rounded-lg p-4 mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <Clock className="w-5 h-5" />
-                Latest Unwatched Episodes
-              </h3>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">Sort by:</span>
-                <button
-                  onClick={() => setLatestEpisodesSortOrder(latestEpisodesSortOrder === 'newest' ? 'oldest' : 'newest')}
-                  className={`px-3 py-1 rounded text-sm transition-colors ${
-                    latestEpisodesSortOrder === 'newest' 
-                      ? 'bg-red-700 text-white' 
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  Newest
-                </button>
-                <button
-                  onClick={() => setLatestEpisodesSortOrder(latestEpisodesSortOrder === 'oldest' ? 'newest' : 'oldest')}
-                  className={`px-3 py-1 rounded text-sm transition-colors ${
-                    latestEpisodesSortOrder === 'oldest' 
-                      ? 'bg-red-700 text-white' 
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  Oldest
-                </button>
-              </div>
+          <section className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <h2 className="text-lg font-semibold">Your watchlist</h2>
+              <WatchlistTabs value={activeTab} onChange={setActiveTab} watchlist={watchlist} />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {getLatestUnwatchedEpisodes().map((episode, index) => (
-                <div key={`${episode.showId}-${episode.id}`} className="bg-black border border-gray-700 rounded p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => toggleEpisodeWatched(episode.showId, episode.id)}
-                        className="flex-shrink-0"
-                      >
-                        <Circle className="w-4 h-4 text-gray-400" />
-                      </button>
-                      <span className="text-sm font-medium text-gray-300">
-                        {episode.showTitle}
-                      </span>
-                    </div>
-                    <span className="text-xs text-gray-500">
-                      {new Date(episode.airDate).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <div className="ml-6">
-                    <p className="text-sm text-white">
-                      S{episode.season}E{episode.episode.toString().padStart(2, '0')}: {episode.title}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
-        {/* 📅 Upcoming Unaired Episodes */}
-        {getUpcomingUnwatchedEpisodes().length > 0 && (
-          <div className="bg-gray-900 border border-red-900 rounded-lg p-4 mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <Calendar className="w-5 h-5" />
-                Upcoming Unaired Episodes
-              </h3>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-gray-400">Sort by:</span>
-                <button
-                  onClick={() => setUpcomingEpisodesSortOrder(upcomingEpisodesSortOrder === 'soonest' ? 'latest' : 'soonest')}
-                  className={`px-3 py-1 rounded text-sm transition-colors ${
-                    upcomingEpisodesSortOrder === 'soonest' 
-                      ? 'bg-red-700 text-white' 
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  Soonest
-                </button>
-                <button
-                  onClick={() => setUpcomingEpisodesSortOrder(upcomingEpisodesSortOrder === 'latest' ? 'soonest' : 'latest')}
-                  className={`px-3 py-1 rounded text-sm transition-colors ${
-                    upcomingEpisodesSortOrder === 'latest' 
-                      ? 'bg-red-700 text-white' 
-                      : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  }`}
-                >
-                  Latest
-                </button>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {getUpcomingUnwatchedEpisodes().map((episode, index) => (
-                <div key={`${episode.showId}-${episode.id}`} className="bg-black border border-gray-700 rounded p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Circle className="w-4 h-4 text-gray-400" />
-                      <span className="text-sm font-medium text-gray-300">
-                        {episode.showTitle}
-                      </span>
-                    </div>
-                    <span className="text-xs text-gray-500">
-                      {new Date(episode.airDate).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <div className="ml-6">
-                    <p className="text-sm text-white">
-                      S{episode.season}E{episode.episode.toString().padStart(2, '0')}: {episode.title}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+            {filteredItems.length > 0 ? (
+              <WatchlistGrid items={filteredItems} onSelect={setActiveShowId} />
+            ) : (
+              <EmptyState
+                title={watchlist.length === 0 ? "Your watchlist is empty" : "Nothing in this tab"}
+                description={
+                  watchlist.length === 0
+                    ? "Tap Search shows at the top to find something to track."
+                    : "Switch tabs above or add new shows via Search."
+                }
+              />
+            )}
+          </section>
+        </main>
 
-        {/* 📑 Tabs */}
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={() => {
-              console.log('📑 Switching to unwatched tab');
-              setActiveTab('unwatched');
-            }}
-            className={`px-4 py-2 rounded font-semibold transition-colors ${
-              activeTab === 'unwatched' 
-                ? 'bg-red-700 text-white' 
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-            }`}
-          >
-            📺 Unwatched ({watchlist.filter(i => !i.watched).length})
-          </button>
-          <button
-            onClick={() => {
-              console.log('📑 Switching to watched tab');
-              setActiveTab('watched');
-            }}
-            className={`px-4 py-2 rounded font-semibold transition-colors ${
-              activeTab === 'watched' 
-                ? 'bg-red-700 text-white' 
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-            }`}
-          >
-            ✅ Watched ({watchlist.filter(i => i.watched).length})
-          </button>
-          <button
-            onClick={() => {
-              console.log('📑 Switching to all tab');
-              setActiveTab('all');
-            }}
-            className={`px-4 py-2 rounded font-semibold transition-colors ${
-              activeTab === 'all' 
-                ? 'bg-red-700 text-white' 
-                : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
-            }`}
-          >
-            📚 All ({watchlist.length})
-          </button>
-        </div>
+        <ShowDrawer
+          show={activeShow}
+          onClose={() => setActiveShowId(null)}
+          onMarkSeries={markSeriesWatched}
+          onMarkSeason={markSeasonWatched}
+          onToggleEpisode={toggleEpisodeWatched}
+          onRemove={removeFromWatchlist}
+        />
 
-        {/* 📺 Watchlist Display with Episode Tracking */}
-        <div className="space-y-2">
-          {getFilteredItems().map(item => (
-            <div key={item.id} className="bg-gray-900 border border-red-900 rounded-lg overflow-hidden">
-              <button
-                onClick={() => toggleShowExpansion(item.id)}
-                className="w-full bg-gradient-to-r from-red-900 to-red-700 p-3 text-left hover:from-red-800 hover:to-red-600 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-2">
-                      {expandedShows.has(item.id) ? (
-                        <ChevronUp className="w-4 h-4" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4" />
-                      )}
-                      <Tv className="w-4 h-4" />
-                    </div>
-                    <h3 className="font-semibold">{item.title}</h3>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    {item.totalEpisodes > 0 && (
-                      <span className="bg-black bg-opacity-50 px-2 py-1 rounded">
-                        {item.watchedEpisodesCount}/{item.totalEpisodes} episodes
-                      </span>
-                    )}
-                    {item.watched && (
-                      <CheckCircle className="w-4 h-4 text-green-400" />
-                    )}
-                  </div>
-                </div>
-              </button>
-              
-              {/* Show detailed information only when expanded */}
-              {expandedShows.has(item.id) && (
-                <div className="p-3 border-t border-gray-700">
-                  <p className="text-sm text-gray-400 mb-2">
-                    {item.platform} • {item.status} • {item.runtime ? `${item.runtime} min` : 'N/A'}
-                  </p>
-                  
-                  {/* 🎭 Genres */}
-                  {item.genres && item.genres.length > 0 && (
-                    <p className="text-xs text-gray-500 mb-2">
-                      {item.genres.join(' • ')}
-                    </p>
-                  )}
-                  
-                  {/* 📅 Next Episode / Release Date */}
-                  {item.nextEpisode && item.nextEpisode.season && !item.watched && (
-                    <div className="bg-black rounded p-2 mb-2">
-                      <p className="text-sm font-semibold flex items-center gap-1">
-                        <Play className="w-3 h-3" /> Next Episode:
-                      </p>
-                      <p className="text-xs text-gray-400">
-                        S{item.nextEpisode.season}E{item.nextEpisode.episode}: {item.nextEpisode.title}
-                      </p>
-                      <p className="text-xs text-red-400 flex items-center gap-1 mt-1">
-                        <Calendar className="w-3 h-3" /> {item.nextEpisode.airDate} {item.nextEpisode.airTime && `at ${item.nextEpisode.airTime}`}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* 📺 Seasons and Episodes */}
-                  {item.seasons && item.seasons.length > 0 && (
-                    <div className="mt-3">
-                      <h4 className="text-sm font-semibold mb-2">Seasons & Episodes</h4>
-                      <div className="space-y-2">
-                        {item.seasons.map(season => (
-                          <div key={season.number} className="border border-gray-700 rounded">
-                            <div className="flex items-center">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleSeasonExpansion(item.id, season.number);
-                                }}
-                                className="flex-1 flex items-center justify-between p-2 hover:bg-gray-800 text-left"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium">Season {season.number}</span>
-                                  <span className="text-xs text-gray-400">
-                                    {season.watchedEpisodes}/{season.totalEpisodes} watched
-                                  </span>
-                                </div>
-                                {item.expandedSeasons?.includes(season.number) ? (
-                                  <ChevronUp className="w-4 h-4" />
-                                ) : (
-                                  <ChevronDown className="w-4 h-4" />
-                                )}
-                              </button>
-                              <div className="flex gap-1 p-1">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    markSeasonWatched(item.id, season.number, true);
-                                  }}
-                                  className="px-2 py-1 bg-green-700 hover:bg-green-600 rounded text-xs"
-                                  title="Mark season as watched"
-                                >
-                                  <Check className="w-3 h-3" />
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    markSeasonWatched(item.id, season.number, false);
-                                  }}
-                                  className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs"
-                                  title="Mark season as unwatched"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                            </div>
-                            
-                            {item.expandedSeasons?.includes(season.number) && (
-                              <div className="p-2 bg-gray-800 border-t border-gray-700">
-                                <div className="grid grid-cols-1 gap-1 max-h-60 overflow-y-auto">
-                                  {season.episodes.map(episode => (
-                                    <div key={episode.id} className="flex items-center justify-between p-2 hover:bg-gray-700 rounded text-sm">
-                                      <div className="flex items-center gap-2">
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleEpisodeWatched(item.id, episode.id);
-                                          }}
-                                          className="flex-shrink-0"
-                                        >
-                                          {episode.watched ? (
-                                            <CheckCircle className="w-4 h-4 text-green-400" />
-                                          ) : (
-                                            <Circle className="w-4 h-4 text-gray-400" />
-                                          )}
-                                        </button>
-                                        <span className="font-medium">
-                                          S{episode.season}E{episode.episode.toString().padStart(2, '0')}
-                                        </span>
-                                        <span className="text-gray-300">{episode.title}</span>
-                                      </div>
-                                      <div className="text-xs text-gray-400">
-                                        {episode.airDate}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 🔗 Links */}
-                  <div className="flex gap-2 text-xs mb-2 mt-3">
-                    {item.tvmazeUrl && (
-                      <a 
-                        href={item.tvmazeUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-red-400 hover:text-red-300 underline"
-                      >
-                        TVmaze ↗
-                      </a>
-                    )}
-                    {item.officialSite && (
-                      <a 
-                        href={item.officialSite} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-red-400 hover:text-red-300 underline"
-                      >
-                        Official Site ↗
-                      </a>
-                    )}
-                  </div>
-
-                  {/* 🎮 Action Buttons */}
-                  <div className="flex gap-2 mt-3">
-                    {!item.watched ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          markAsWatched(item.id, item.type === 'tv' ? item.nextEpisode : null);
-                        }}
-                        className="flex-1 bg-green-700 hover:bg-green-600 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
-                      >
-                        <Check className="w-3 h-3" /> Mark Series Watched
-                      </button>
-                    ) : (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          markSeriesWatched(item.id, false);
-                        }}
-                        className="flex-1 bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
-                      >
-                        <X className="w-3 h-3" /> Unwatch Series
-                      </button>
-                    )}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeFromWatchlist(item.id);
-                      }}
-                      className="flex-1 bg-red-800 hover:bg-red-700 px-2 py-1 rounded text-sm flex items-center justify-center gap-1"
-                    >
-                      <X className="w-3 h-3" /> Remove
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* 📭 Empty State */}
-        {getFilteredItems().length === 0 && (
-          <div className="text-center py-12 text-gray-500">
-            <Info className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>No shows in this category yet!</p>
-            <p className="text-sm mt-1">Search for TV shows to add them to your watchlist.</p>
-          </div>
-        )}
+        <AppFooter />
       </div>
-
-      {/* 📝 Footer */}
-      <footer className="mt-12 bg-gray-900 border-t border-red-900 p-4 text-center text-sm text-gray-500">
-        <p>🎬 lowbass' TV Tracker • Created by Joshua 'lowbass' Sommerfeldt</p>
-        <p className="mt-1">Track your shows across Netflix, HBO, theaters & more! 🍿</p>
-      </footer>
-    </div>
+    </TooltipProvider>
   );
 };
 
-// 🚀 Export the app component
-export default App; 
+export default App;

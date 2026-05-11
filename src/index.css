@@ -1,3 +1,99 @@
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/inter/800.css';
+
 @tailwind base;
 @tailwind components;
-@tailwind utilities; 
+@tailwind utilities;
+
+@layer base {
+  :root,
+  .dark {
+    /* Near-black canvas with a crimson primary that matches the previous red-700/800. */
+    --background: 0 0% 4%;
+    --foreground: 0 0% 96%;
+
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 96%;
+
+    --popover: 0 0% 6%;
+    --popover-foreground: 0 0% 96%;
+
+    --primary: 0 65% 38%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 240 4% 14%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 240 4% 11%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 0 65% 28%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 142 60% 35%;
+    --success-foreground: 0 0% 98%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 10%;
+
+    --border: 0 0% 14%;
+    --input: 0 0% 12%;
+    --ring: 0 65% 50%;
+
+    --radius: 0.75rem;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    background-image:
+      radial-gradient(900px 480px at 50% -120px, hsl(var(--primary) / 0.18), transparent 70%),
+      radial-gradient(700px 360px at 10% 10%, hsl(var(--primary) / 0.06), transparent 60%);
+    background-attachment: fixed;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.4);
+  }
+}
+
+@layer utilities {
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  .glass {
+    background: hsl(var(--card) / 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .glass-strong {
+    background: hsl(var(--background) / 0.78);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.6);
+  }
+}
