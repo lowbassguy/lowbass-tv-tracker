@@ -163,6 +163,7 @@ pids
 # Local development
 .vercel
 .netlify
+.wrangler/
 
 # Storybook build outputs
 storybook-static

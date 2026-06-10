@@ -1,0 +1,8 @@
+name = "lowbass-tv-tracker"
+compatibility_date = "2026-06-10"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lowbass-tv-tracker-db"
+database_id = "8f1c97b0-c8e4-421a-936e-3ee360c4704d"

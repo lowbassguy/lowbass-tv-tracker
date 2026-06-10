@@ -1,0 +1,30 @@
+CREATE TABLE IF NOT EXISTS shows (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  type TEXT,
+  year TEXT,
+  platform TEXT,
+  genres TEXT,
+  status TEXT,
+  poster TEXT,
+  rating TEXT,
+  summary TEXT,
+  language TEXT,
+  runtime INTEGER,
+  premiered TEXT,
+  officialSite TEXT,
+  tvmazeUrl TEXT,
+  tvmazeId INTEGER,
+  addedDate TEXT,
+  watched INTEGER DEFAULT 0,
+  watchedDate TEXT,
+  seasons TEXT,
+  episodes TEXT,
+  totalEpisodes INTEGER DEFAULT 0,
+  watchedEpisodesCount INTEGER DEFAULT 0,
+  lastUpdated TEXT,
+  expandedSeasons TEXT,
+  nextEpisode TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_shows_added_date ON shows(addedDate DESC);

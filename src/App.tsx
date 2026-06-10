@@ -316,7 +316,7 @@ const App = () => {
         throw new Error(`API returned status: ${response.status}`);
       }
       
-      const data = await response.json();
+      const data = await response.json() as any[];
       console.log('📥 Raw API response:', data);
       
       // 🎨 Transform TVmaze data to our format
@@ -411,7 +411,7 @@ const App = () => {
             if (!response.ok) {
               throw new Error(`TVmaze ${response.status} for show ${show.tvmazeId}`);
             }
-            const data = await response.json();
+            const data = await response.json() as any;
 
             if (data._embedded?.nextepisode) {
               const nextEp = data._embedded.nextepisode;

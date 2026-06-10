@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "cf:deploy": "npm run build && wrangler pages deploy dist --project-name lowbass-tv-tracker --branch lb_1",
+    "cf:d1:schema": "wrangler d1 execute lowbass-tv-tracker-db --remote --file migrations/0001_create_shows.sql"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
@@ -29,6 +31,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260610.1",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@typescript-eslint/eslint-plugin": "^6.14.0",
@@ -41,7 +44,8 @@
     "postcss": "^8.4.32",
     "tailwindcss": "^3.3.6",
     "typescript": "^5.2.2",
-    "vite": "^5.0.8"
+    "vite": "^5.0.8",
+    "wrangler": "^4.99.0"
   },
   "keywords": [
     "tv",

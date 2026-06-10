@@ -38,7 +38,7 @@ interface HealthStatus {
 }
 
 class ApiClient {
-  private async request(endpoint: string, options: RequestInit = {}) {
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
     
     const response = await fetch(url, {
@@ -54,14 +54,14 @@ class ApiClient {
       throw new Error(`API Error: ${response.status} ${response.statusText}`);
     }
     
-    return response.json();
+    return response.json() as Promise<T>;
   }
 
   // Load all shows from database
   async loadWatchlist(): Promise<Show[]> {
     console.log('📥 Loading watchlist from API...');
     try {
-      const watchlist = await this.request('/watchlist');
+      const watchlist = await this.request<Show[]>('/watchlist');
       console.log('✅ Loaded', watchlist.length, 'shows from API');
       return watchlist;
     } catch (error) {
@@ -73,7 +73,7 @@ class ApiClient {
   async getHealthStatus(): Promise<HealthStatus> {
     console.log('Checking API health status...');
     try {
-      const health = await this.request('/health');
+      const health = await this.request<HealthStatus>('/health');
       console.log('API health status loaded');
       return health;
     } catch (error) {
