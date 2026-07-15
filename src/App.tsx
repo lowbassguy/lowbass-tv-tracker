@@ -110,6 +110,12 @@ const App = () => {
   // Always-fresh handle on the watchlist so the daily-update timer doesn't
   // execute against a stale snapshot captured at mount.
   const watchlistRef = useRef<Show[]>([]);
+  // Gate for the daily update. At mount watchlistRef is legitimately empty rather
+  // than stale -- the load below has not resolved yet -- so kicking off the update
+  // on mount always tripped its `length === 0` guard and returned immediately. That
+  // left the midnight timer as the only path that could ever refresh, which requires
+  // the tab to be open at midnight, so in practice nothing refreshed at all.
+  const [watchlistLoaded, setWatchlistLoaded] = useState(false);
 
   // 💾 Load watchlist from database on component mount
   useEffect(() => {
@@ -122,6 +128,11 @@ const App = () => {
       } catch (err) {
         console.error('❌ Error loading watchlist:', err);
         setError('Failed to load saved data');
+      } finally {
+        // Release the daily update regardless of outcome. On failure the watchlist
+        // stays empty and the update no-ops harmlessly, but the timer still gets
+        // armed so a show added later can still be refreshed.
+        setWatchlistLoaded(true);
       }
     };
     
@@ -167,6 +178,10 @@ const App = () => {
 
   // 📅 Daily update system - refresh episode data
   useEffect(() => {
+    // Wait for the initial load to resolve. Without this the mount-time run below
+    // races the watchlist fetch and always loses.
+    if (!watchlistLoaded) return;
+
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
@@ -284,7 +299,9 @@ const App = () => {
       cancelled = true;
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     };
-  }, []); // Stable schedule — fresh data comes from watchlistRef.
+    // Runs once, when the initial load resolves. Still a stable schedule after that
+    // -- fresh data comes from watchlistRef, not from re-arming on watchlist changes.
+  }, [watchlistLoaded]);
 
   // Note: Watchlist is now saved to database immediately when changed (no auto-save useEffect needed)
 
